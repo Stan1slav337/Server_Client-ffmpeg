@@ -1,11 +1,11 @@
 #define UX_SOCKET_PATH "/tmp/server.sock"
-#define CHUNK_SIZE 1024
+#define CHUNK_SIZE 4096
 #define FILE_SIZE 256
 
 typedef enum
 {
     kEncode,
-    kSendChunk
+    kCut
 } OperationType;
 
 typedef struct

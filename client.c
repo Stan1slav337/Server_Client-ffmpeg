@@ -5,8 +5,11 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <signal.h>
 
 #include "common.h"
+
+int sock_fd;
 
 typedef struct
 {
@@ -36,14 +39,47 @@ void *receive_handler(void *arg)
         if (resp.remaining_chunks == 0)
         {
             // Last chunk received
-            printf("File processed completely, output: %s\n", resp.output_filename);
+            printf("\nFile processed completely, output: %s\n", resp.output_filename);
         }
     }
 }
 
+void option_encoding(Request *req)
+{
+    req->operation = kEncode;
+    printf("Choose encoder type:\n");
+    printf("1. h264\n");
+    printf("2. h265\n");
+    printf("3. AV1\n");
+    printf("Enter your choice: ");
+
+    int encoder_choice;
+    scanf("%d", &encoder_choice);
+    switch (encoder_choice)
+    {
+    case 1:
+        strcpy(req->encoder, "libx264");
+        break;
+    case 2:
+        strcpy(req->encoder, "libx265");
+        break;
+    case 3:
+        strcpy(req->encoder, "libsvtav");
+        break;
+    default:
+        printf("Invalid option!\n");
+        option_encoding(req);
+    }
+}
+
+void shutdown_handler(int sig)
+{
+    close(sock_fd);
+    exit(0);
+}
+
 int main()
 {
-    int sock_fd;
     struct sockaddr_un server_addr;
     Request req;
 
@@ -54,6 +90,9 @@ int main()
         perror("socket");
         exit(EXIT_FAILURE);
     }
+
+    signal(SIGINT, shutdown_handler);
+    signal(SIGTERM, shutdown_handler);
 
     memset(&server_addr, 0, sizeof(struct sockaddr_un));
     server_addr.sun_family = AF_UNIX;
@@ -81,75 +120,49 @@ int main()
         int option;
         scanf("%d", &option);
 
-        if (option == 1)
+        printf("Enter input filename: ");
+        scanf("%s", req.input_filename);
+        printf("Enter output filename: ");
+        scanf("%s", req.output_filename);
+
+        switch (option)
         {
-            req.operation = kEncode;
-            printf("Enter input filename: ");
-            scanf("%s", req.input_filename);
-            printf("Enter output filename: ");
-            scanf("%s", req.output_filename);
+        case 1:
+            option_encoding(&req);
+            break;
 
-            printf("Choose encoder type:\n");
-            printf("1. h264\n");
-            printf("2. h265\n");
-            printf("3. AV1\n");
-            printf("Enter your choice: ");
-
-            int encoder_choice;
-            scanf("%d", &encoder_choice);
-            switch (encoder_choice)
-            {
-            case 1:
-                strcpy(req.encoder, "libx264");
-                break;
-            case 2:
-                strcpy(req.encoder, "libx265");
-                break;
-            case 3:
-                strcpy(req.encoder, "libsvtav");
-                break;
-            default:
-                printf("Invalid option!\n");
-                continue;
-            }
-
-            // Open file to determine the number of chunks
-            FILE *file = fopen(req.input_filename, "rb");
-            if (!file)
-            {
-                perror("Failed to open file");
-                close(sock_fd);
-                return -1;
-            }
-
-            // Determine file size and number of chunks
-            fseek(file, 0, SEEK_END);
-            long file_size = ftell(file);
-            rewind(file);
-            req.remaining_chunks = file_size / CHUNK_SIZE + (file_size % CHUNK_SIZE != 0); // Calculate chunks
-
-            // Send request header for encode
-            write(sock_fd, &req, sizeof(Request));
-
-            // Send file in chunks
-            while (req.remaining_chunks--)
-            {
-                size_t bytes_read = fread(req.chunk, 1, CHUNK_SIZE, file);
-                if (bytes_read > 0)
-                {
-                    req.operation = kSendChunk;
-                    // Sending only the necessary bytes in the last chunk
-                    write(sock_fd, &req, sizeof(Request) - CHUNK_SIZE + bytes_read);
-                }
-            }
-            fclose(file);
+        default:
+            printf("Invalid option\n");
+            continue;
         }
-        else
+
+        // Open file to determine the number of chunks
+        FILE *file = fopen(req.input_filename, "rb");
+        if (!file)
         {
-            printf("Invalid option!\n");
+            perror("Failed to open file");
+            close(sock_fd);
+            return -1;
         }
+
+        // Determine file size and number of chunks
+        fseek(file, 0, SEEK_END);
+        long file_size = ftell(file);
+        rewind(file);
+        req.remaining_chunks = file_size / CHUNK_SIZE + (file_size % CHUNK_SIZE != 0); // Calculate chunks
+
+        // Send file in chunks
+        while (req.remaining_chunks--)
+        {
+            size_t bytes_read = fread(req.chunk, 1, CHUNK_SIZE, file);
+            if (bytes_read > 0)
+            {
+                // Sending only the necessary bytes in the last chunk
+                write(sock_fd, &req, sizeof(Request) - CHUNK_SIZE + bytes_read);
+            }
+        }
+        fclose(file);
     }
 
-    close(sock_fd);
     return 0;
 }

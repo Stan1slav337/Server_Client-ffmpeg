@@ -4,7 +4,6 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <pthread.h>
-#include <semaphore.h>
 #include <signal.h>
 
 #include "common.h"
@@ -24,7 +23,6 @@ typedef struct
 typedef struct
 {
     int client_socket;
-    sem_t sem;
     char filename[FILE_SIZE];
     char out_filename[FILE_SIZE];
     char encoder[10];
@@ -44,57 +42,63 @@ void *client_handler(void *arg)
 
     FILE *input_file = NULL;
     char unique_filename[FILE_SIZE];
-    int unique_id = 0;
-
-    file_processing_arg_t *processing_arg = malloc(sizeof(file_processing_arg_t));
-    processing_arg->client_socket = client_fd;
+    int unique_id = 1;
 
     size_t bytes_received = 0UL;
     while ((bytes_received = read(client_fd, &req, sizeof(Request))) > 0)
     {
-        switch (req.operation)
+        printf("Received a chunk for file: %s. Remaining chunks: %d\n",
+               req.input_filename, req.remaining_chunks);
+
+        // Open only once
+        if (!input_file)
         {
-        case kEncode:
-            // Generate a unique identifier for each encode request
-            unique_id++;
+            // Generate a unique identifier for each request
             snprintf(unique_filename, sizeof(unique_filename), "%d_%d_%s", client_fd, unique_id, req.input_filename);
-            printf("Prepare to encode using %s encoder, expecting %d chunks. Temporary file: %s\n",
-                   req.encoder, req.remaining_chunks, unique_filename);
-
             input_file = fopen(unique_filename, "wb");
-            if (!input_file)
-            {
-                perror("Failed to open file for writing");
-                continue; // Skip to the next iteration if file opening fails
-            }
+        }
 
-            // Start a new thread for processing
-            pthread_t processing_thread;
-            sem_init(&processing_arg->sem, 0, 0);
-            strcpy(processing_arg->filename, unique_filename);
-            strcpy(processing_arg->out_filename, req.output_filename);
-            strcpy(processing_arg->encoder, req.encoder);
-            pthread_create(&processing_thread, NULL, encode_handler, processing_arg);
-            pthread_detach(processing_thread);
-            break;
-
-        case kSendChunk:
-            printf("Receiving chunk\n");
-            if (input_file)
+        if (!input_file)
+        {
+            perror("Failed to open file for writing");
+            continue; // Skip to the next iteration if file opening fails
+        }
+        else
+        {
+            fwrite(req.chunk, 1, bytes_received - sizeof(Request) + CHUNK_SIZE, input_file);
+            if (req.remaining_chunks == 0)
             {
-                fwrite(req.chunk, 1, bytes_received - sizeof(Request) + CHUNK_SIZE, input_file);
-                if (req.remaining_chunks == 0)
+                // Last chunk received
+                fclose(input_file);
+                input_file = NULL;
+                unique_id++;
+
+                // Start a new thread for processing
+                printf("File received, starting processing...\n");
+                pthread_t processing_thread;
+                file_processing_arg_t *processing_arg = malloc(sizeof(file_processing_arg_t));
+                processing_arg->client_socket = client_fd;
+                strcpy(processing_arg->filename, unique_filename);
+                strcpy(processing_arg->out_filename, req.output_filename);
+                strcpy(processing_arg->encoder, req.encoder);
+
+                switch (req.operation)
                 {
-                    // Last chunk received
-                    fclose(input_file);
-                    input_file = NULL;
-                    sem_post(&processing_arg->sem);
-                    printf("File received, starting processing...\n");
+                case kEncode:
+                    pthread_create(&processing_thread, NULL, encode_handler, processing_arg);
+                    break;
+
+                case kCut:
+                    // pthread_create(&processing_thread, NULL, cut_handler, processing_arg);
+                    break;
+
+                default:
+                    printf("Unknown operation\n");
+                    continue;
                 }
+
+                pthread_detach(processing_thread);
             }
-            break;
-        default:
-            printf("Unknown operation\n");
         }
     }
 
@@ -140,7 +144,6 @@ void *encode_handler(void *arg)
     strcpy(out_filename, data->out_filename);
     char encoder[10];
     strcpy(encoder, data->encoder);
-    sem_wait(&data->sem);
 
     printf("Starting encoding process for file %s...\n", data->filename);
     char output_filename[FILE_SIZE];
