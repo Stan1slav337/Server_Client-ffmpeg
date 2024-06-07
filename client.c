@@ -22,29 +22,31 @@ void *receive_handler(void *arg)
     int server_fd = receive_data->socket;
     free(receive_data);
 
-    Response resp;
-
-    size_t bytes_received = 0UL;
-    while ((bytes_received = read(server_fd, &resp, sizeof(Response))) > 0)
+    while (1)
     {
-        FILE *file = fopen(resp.output_filename, "ab");
-        if (!file)
-        {
-            perror("Failed to open file for writing");
-            continue; // Skip to the next iteration if file opening fails
-        }
+    // Read header
+    size_t headerSize = sizeof(ResponseHeader);
+    char header_buffer[headerSize];
+    receive_all(server_fd, header_buffer, headerSize);
 
-        fwrite(resp.chunk, 1, bytes_received - sizeof(Response) + CHUNK_SIZE, file);
-        fclose(file);
-        if (resp.remaining_chunks == 0)
-        {
-            // Last chunk received
-            printf("\nFile processed completely, output: %s\n", resp.output_filename);
-        }
+    // Cast the buffer to struct
+    ResponseHeader resp;
+    memcpy(&resp, header_buffer, headerSize);
+
+    FILE *file = fopen(resp.output_filename, "ab");
+    if (!file)
+    {
+        perror("Failed to open file for writing");
+        return NULL;
+    }
+
+    receive_file(server_fd, file, resp.length);
+    fclose(file);
+    printf("\nFile processed completely, output: %s\n", resp.output_filename);
     }
 }
 
-void option_encoding(Request *req)
+void option_encoding(RequestHeader *req)
 {
     req->operation = kEncode;
     printf("Choose encoder type:\n");
@@ -81,7 +83,7 @@ void shutdown_handler(int sig)
 int main()
 {
     struct sockaddr_un server_addr;
-    Request req;
+    RequestHeader req;
 
     // Create socket
     sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -147,20 +149,11 @@ int main()
 
         // Determine file size and number of chunks
         fseek(file, 0, SEEK_END);
-        long file_size = ftell(file);
+        req.length = ftell(file);
         rewind(file);
-        req.remaining_chunks = file_size / CHUNK_SIZE + (file_size % CHUNK_SIZE != 0); // Calculate chunks
 
-        // Send file in chunks
-        while (req.remaining_chunks--)
-        {
-            size_t bytes_read = fread(req.chunk, 1, CHUNK_SIZE, file);
-            if (bytes_read > 0)
-            {
-                // Sending only the necessary bytes in the last chunk
-                write(sock_fd, &req, sizeof(Request) - CHUNK_SIZE + bytes_read);
-            }
-        }
+        send_all(sock_fd, (char*)&req, sizeof(RequestHeader));
+        send_file(sock_fd, file);
         fclose(file);
     }
 
