@@ -24,25 +24,25 @@ void *receive_handler(void *arg)
 
     while (1)
     {
-    // Read header
-    size_t headerSize = sizeof(ResponseHeader);
-    char header_buffer[headerSize];
-    receive_all(server_fd, header_buffer, headerSize);
+        // Read header
+        size_t headerSize = sizeof(ResponseHeader);
+        char header_buffer[headerSize];
+        receive_all(server_fd, header_buffer, headerSize);
 
-    // Cast the buffer to struct
-    ResponseHeader resp;
-    memcpy(&resp, header_buffer, headerSize);
+        // Cast the buffer to struct
+        ResponseHeader resp;
+        memcpy(&resp, header_buffer, headerSize);
 
-    FILE *file = fopen(resp.output_filename, "ab");
-    if (!file)
-    {
-        perror("Failed to open file for writing");
-        return NULL;
-    }
+        FILE *file = fopen(resp.output_filename, "ab");
+        if (!file)
+        {
+            perror("Failed to open file for writing");
+            return NULL;
+        }
 
-    receive_file(server_fd, file, resp.length);
-    fclose(file);
-    printf("\nFile processed completely, output: %s\n", resp.output_filename);
+        receive_file(server_fd, file, resp.length);
+        fclose(file);
+        printf("\nFile processed completely, output: %s\n", resp.output_filename);
     }
 }
 
@@ -152,7 +152,7 @@ int main()
         req.length = ftell(file);
         rewind(file);
 
-        send_all(sock_fd, (char*)&req, sizeof(RequestHeader));
+        send_all(sock_fd, (char *)&req, sizeof(RequestHeader));
         send_file(sock_fd, file);
         fclose(file);
     }
