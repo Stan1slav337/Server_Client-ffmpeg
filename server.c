@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <signal.h>
+#include <microhttpd.h>
 
 #include "common.h"
 
@@ -39,7 +40,7 @@ void *client_handler(void *arg)
     free(client_data);
 
     FILE *input_file = NULL;
-    char unique_filename[FILE_SIZE];
+    char unique_filename[FILE_SIZE + 30];
     int unique_id = 1;
 
     while (1)
@@ -122,32 +123,32 @@ void shutdown_handler(int sig)
     printf("Server shutting down...\n");
 }
 
-void *encode_handler(void *arg)
+void ffmpeg_encode(char *filename, char *encoder, char **output_filename)
 {
-    file_processing_arg_t *data = (file_processing_arg_t *)arg;
-    int socket = data->client_socket;
-    char filename[FILE_SIZE];
-    strcpy(filename, data->filename);
-    char out_filename[FILE_SIZE];
-    strcpy(out_filename, data->out_filename);
-    char encoder[10];
-    strcpy(encoder, data->encoder);
-
-    printf("Starting encoding process for file %s...\n", data->filename);
-    char output_filename[FILE_SIZE];
-    snprintf(output_filename, sizeof(output_filename), "encoded_%s", filename);
+    printf("Starting encoding process for file %s...\n", filename);
+    int out_size = strlen(filename) + 10;
+    *output_filename = malloc(out_size);
+    snprintf(*output_filename, out_size, "encoded_%s", filename);
 
     // Construct FFmpeg command to encode the video
     char command[1024];
     snprintf(command, sizeof(command), "ffmpeg -i \"%s\" -c:v %s -c:a copy \"%s\"",
-             filename, encoder, output_filename);
+             filename, encoder, *output_filename);
 
     // Execute FFmpeg command
     system(command);
 
-    printf("Encoding completed for file %s, output in %s\n", filename, output_filename);
+    printf("Encoding completed for file %s, output in %s\n", filename, *output_filename);
+}
 
-    send_response_file(socket, output_filename, out_filename);
+void *encode_handler(void *arg)
+{
+    file_processing_arg_t *data = (file_processing_arg_t *)arg;
+
+    char *output_filename;
+    ffmpeg_encode(data->filename, data->encoder, &output_filename);
+
+    send_response_file(data->client_socket, output_filename, data->out_filename);
 }
 
 void send_response_file(int socket, char *filename, char *out_filename)
@@ -168,13 +169,188 @@ void send_response_file(int socket, char *filename, char *out_filename)
     resp.length = ftell(file);
     rewind(file);
 
-    send_all(socket, (char*)&resp, sizeof(ResponseHeader));
+    send_all(socket, (char *)&resp, sizeof(ResponseHeader));
     send_file(socket, file);
     fclose(file);
 }
 
+struct connection_info_struct
+{
+    FILE *fp;
+    int operation;
+    char *encoder;
+    char *filename;
+    char *output_filename;
+    struct MHD_PostProcessor *postprocessor;
+};
+
+enum MHD_Result send_ws_response(struct MHD_Connection *connection, char *message, int success)
+{
+    char error_json[1024];
+    snprintf(error_json, sizeof(error_json), "{\"status\": \"%s\", \"message\": \"%s.\"}", success ? "success" : "error", message);
+    printf("%s\n", error_json);
+    struct MHD_Response *response = MHD_create_response_from_buffer(strlen(error_json),
+                                                                    (void *)error_json, MHD_RESPMEM_MUST_COPY);
+    int ret = MHD_queue_response(connection, success ? MHD_HTTP_OK : MHD_HTTP_BAD_REQUEST, response);
+    MHD_destroy_response(response);
+
+    return ret;
+}
+
+static int send_ws_file_response(struct MHD_Connection *connection, const char *filename)
+{
+    FILE *file = fopen(filename, "rb");
+    if (!file)
+    {
+        return send_ws_response(connection, "Server couldn't open file", 0);
+    }
+
+    // Obtain file size:
+    fseek(file, 0, SEEK_END);
+    size_t size = ftell(file);
+    rewind(file);
+
+    // Create the response
+    
+    struct MHD_Response *response = MHD_create_response_from_fd_at_offset64(size, fileno(file), 0);
+    MHD_add_response_header(response, "Content-Type", "video/mp4");
+    MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
+    int ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
+    MHD_destroy_response(response);
+
+    return ret;
+}
+
+int ws_unique_id = 0;
+
+enum MHD_Result iterate_post(void *coninfo_cls, enum MHD_ValueKind kind, const char *key,
+                             const char *filename, const char *content_type,
+                             const char *transfer_encoding, const char *data, uint64_t off,
+                             size_t size)
+{
+    struct connection_info_struct *con_info = coninfo_cls;
+
+    if (0 == strcmp(key, "file"))
+    {
+        if (0 == off)
+        {
+            // Open a file for writing; use filename provided by client
+            ws_unique_id++;
+            char unique_filename[FILE_SIZE + 15];
+            snprintf(unique_filename, sizeof(unique_filename), "ws_%d_%s", ws_unique_id, filename);
+            con_info->filename = strdup(unique_filename);
+            con_info->fp = fopen(unique_filename, "wb");
+            if (!con_info->fp)
+                return MHD_NO;
+        }
+        if (size > 0)
+        {
+            fwrite(data, size, 1, con_info->fp);
+        }
+        return MHD_YES;
+    }
+    if (0 == strcmp(key, "output_filename"))
+    {
+        con_info->output_filename = strdup(data);
+    }
+    if (0 == strcmp(key, "encoder"))
+    {
+        con_info->encoder = strdup(data);
+    }
+    if (0 == strcmp(key, "operation"))
+    {
+        con_info->operation = atoi(data);
+    }
+    return MHD_YES;
+}
+
+void request_completed(void *cls, struct MHD_Connection *connection,
+                       void **con_cls, enum MHD_RequestTerminationCode toe)
+{
+    struct connection_info_struct *con_info = *con_cls;
+
+    if (NULL == con_info)
+        return;
+
+    if (con_info->fp)
+    {
+        fclose(con_info->fp);
+        con_info->fp = NULL;
+    }
+    if (con_info->filename)
+        free(con_info->filename);
+
+    MHD_destroy_post_processor(con_info->postprocessor);
+    free(con_info);
+    *con_cls = NULL;
+}
+
+enum MHD_Result answer_to_connection(void *cls, struct MHD_Connection *connection,
+                                     const char *url, const char *method,
+                                     const char *version, const char *upload_data,
+                                     size_t *upload_data_size, void **con_cls)
+{
+    if (NULL == *con_cls)
+    {
+        struct connection_info_struct *con_info = malloc(sizeof(struct connection_info_struct));
+        if (NULL == con_info)
+            return MHD_NO;
+
+        if (0 == strcmp(method, "POST"))
+        {
+            con_info->postprocessor = MHD_create_post_processor(connection, 1024, iterate_post, (void *)con_info);
+            if (NULL == con_info->postprocessor)
+            {
+                free(con_info);
+                return MHD_NO;
+            }
+
+            *con_cls = (void *)con_info;
+            return MHD_YES;
+        }
+    }
+
+    if (0 == strcmp(method, "POST"))
+    {
+        struct connection_info_struct *con_info = *con_cls;
+
+        if (*upload_data_size != 0)
+        {
+            MHD_post_process(con_info->postprocessor, upload_data, *upload_data_size);
+            *upload_data_size = 0;
+            return MHD_YES;
+        }
+        else if (NULL != con_info->fp)
+        {
+            fclose(con_info->fp);
+            con_info->fp = NULL;
+
+            char *output_filename;
+            switch (con_info->operation)
+            {
+            case kEncode:
+                ffmpeg_encode(con_info->filename, con_info->encoder, &output_filename);
+                break;
+
+            case kCut:
+                // ffmpeg_cut(con_info->filename, con_info->encoder, output_filename);
+                break;
+
+            default:
+                printf("Unknown operation from client\n");
+                return send_ws_response(connection, "Invalid operation", 0);
+            }
+
+            return send_ws_file_response(connection, output_filename);
+        }
+    }
+
+    return send_ws_response(connection, "Invalid method", 0);
+}
+
 int main()
 {
+    // Unix part
     int ux_server_fd;
     struct sockaddr_un server_addr;
 
@@ -193,6 +369,14 @@ int main()
     pthread_create(&ux_connection_thread, NULL, ux_connection_handler, connection_arg);
     pthread_detach(ux_connection_thread); // The thread can run independently
 
+    // WS part
+    struct MHD_Daemon *daemon;
+
+    daemon = MHD_start_daemon(MHD_USE_THREAD_PER_CONNECTION, WS_PORT, NULL, NULL,
+                              &answer_to_connection, NULL, MHD_OPTION_NOTIFY_COMPLETED, request_completed, NULL, MHD_OPTION_END);
+    if (NULL == daemon)
+        return 1;
+
     signal(SIGINT, shutdown_handler);
     signal(SIGTERM, shutdown_handler);
 
@@ -201,6 +385,7 @@ int main()
     pause();
 
     close(ux_server_fd);
+    MHD_stop_daemon(daemon);
 
     return 0;
 }

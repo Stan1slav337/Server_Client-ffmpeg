@@ -1,6 +1,7 @@
 #include <stdio.h>
 
 #define UX_SOCKET_PATH "/tmp/server.sock"
+#define WS_PORT 8888
 #define BUFFER_SIZE 4096
 #define FILE_SIZE 256
 
