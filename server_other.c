@@ -4,9 +4,12 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/socket.h>
+#include <sys/sysinfo.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <wait.h>
 
 #include "common.h"
 
@@ -31,15 +34,6 @@ typedef struct {
 
 void *encode_handler(void *arg);
 void send_response_file(int socket, char *filename, char *out_filename);
-
-void print_byte_buffer(const unsigned char *buffer, size_t size) {
-    printf("b'"); // Start of the byte string in Python format
-    for (size_t i = 0; i < size; i++) {
-        printf("\\x%02X", buffer[i]); // Print byte in hexadecimal escape format
-    }
-    printf("'");  // End of the byte string
-    printf("\n"); // Print a newline for better output formatting
-}
 
 // Thread function to handle each client
 void *client_handler(void *arg) {
@@ -68,8 +62,7 @@ void *client_handler(void *arg) {
         memcpy(&req, header_buffer, headerSize);
         printf("GOT HEADER\n");
 
-        // printf("%s\n%s\n%s\n%d\n", req.encoder, req.input_filename,
-        // req.output_filename, req.length);
+        printf("%s\n%s\n", req.input_filename, req.output_filename);
 
         // Create local file and receive from client
         snprintf(unique_filename, sizeof(unique_filename), "%d_%d_%s",
@@ -118,7 +111,7 @@ void *client_handler(void *arg) {
     return NULL;
 }
 
-void *inet_connection_handler(void *arg) {
+void *client_connection_handler(void *arg) {
     connection_thread_arg_t *connection_arg = (connection_thread_arg_t *)arg;
     int server_fd = connection_arg->server_socket;
 
@@ -133,6 +126,139 @@ void *inet_connection_handler(void *arg) {
         client_thread_arg_t *arg = malloc(sizeof(client_thread_arg_t));
         arg->socket = client_fd;
         pthread_create(&client_thread, NULL, client_handler, arg);
+        pthread_detach(client_thread); // Do not wait for thread termination
+    }
+}
+
+// Executa o comanda de sistem si trimite rezultatul clientului
+void execute_system_command(int client_socket, const char *command) {
+    int pipefd[2];
+    pid_t pid;
+
+    if (pipe(pipefd) != 0) {
+        perror("Pipe failed");
+        return;
+    }
+
+    pid = fork();
+    if (pid == -1) {
+        perror("Fork failed");
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return;
+    } else if (pid == 0) {
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        dup2(pipefd[1], STDERR_FILENO);
+        close(pipefd[1]);
+
+        execl("/bin/sh", "sh", "-c", command, (char *)NULL);
+        perror("Exec failed");
+        exit(EXIT_FAILURE);
+    }
+
+    close(pipefd[1]);
+    char buffer[ADMIN_BUFFER_SIZE] = {0};
+    ssize_t bytes_read;
+    char response[ADMIN_BUFFER_SIZE] = {0};
+    int response_len = 0;
+
+    while ((bytes_read = read(pipefd[0], buffer, ADMIN_BUFFER_SIZE - 1)) > 0) {
+        if (response_len + bytes_read < ADMIN_BUFFER_SIZE - 1) {
+            memcpy(response + response_len, buffer, bytes_read);
+            response_len += bytes_read;
+        } else {
+            break;
+        }
+    }
+    response[response_len] = '\0'; // Termina cu NULL output-ul acumulat
+    send(client_socket, response, response_len, 0);
+
+    close(pipefd[0]);
+    wait(NULL); // Asteapta terminarea procesului copil
+}
+
+// Proceseaza comenzi primite de la client
+void process_command(int client_socket, char *command) {
+    if (strncmp(command, "uptime", 6) == 0) {
+        struct sysinfo info;
+        if (sysinfo(&info) != 0) {
+            perror("sysinfo failed");
+            return;
+        }
+        char response[128];
+        snprintf(response, sizeof(response),
+                 "Server is UP for %ldd %ldh%02ldm%02lds", info.uptime / 86400,
+                 (info.uptime % 86400) / 3600, (info.uptime % 3600) / 60,
+                 info.uptime % 60);
+        send(client_socket, response, strlen(response), 0);
+    } else if (strncmp(command, "stats", 5) == 0) {
+        struct sysinfo info;
+        if (sysinfo(&info) != 0) {
+            perror("sysinfo failed");
+            return;
+        }
+
+        char response[ADMIN_BUFFER_SIZE];
+        snprintf(response, sizeof(response),
+                 "Load Avg: %.2f, %.2f, %.2f\n"
+                 "CPU usage: %.2f%% user, %.2f%% sys, %.2f%% idle\n"
+                 "PhysMem: %luM used, %luM free",
+                 (double)info.loads[0] / (1 << SI_LOAD_SHIFT),
+                 (double)info.loads[1] / (1 << SI_LOAD_SHIFT),
+                 (double)info.loads[2] / (1 << SI_LOAD_SHIFT),
+                 (double)info.loads[0] / (1 << SI_LOAD_SHIFT),
+                 (double)info.loads[1] / (1 << SI_LOAD_SHIFT),
+                 (double)info.loads[2] / (1 << SI_LOAD_SHIFT),
+                 (unsigned long)(info.totalram - info.freeram) * info.mem_unit /
+                     1024 / 1024,
+                 (unsigned long)info.freeram * info.mem_unit / 1024 / 1024);
+
+        send(client_socket, response, strlen(response), 0);
+    } else if (strncmp(command, "cmd:", 4) == 0) {
+        execute_system_command(client_socket, command + 4);
+    } else {
+        execute_system_command(client_socket, command);
+    }
+}
+
+// Thread function to handle each client
+void *admin_handler(void *arg) {
+    client_thread_arg_t *client_data = (client_thread_arg_t *)arg;
+    int client_fd = client_data->socket;
+    free(client_data);
+
+    char buffer[ADMIN_BUFFER_SIZE] = {0};
+
+    while (1) {
+        ssize_t num_read = recv(client_fd, buffer, ADMIN_BUFFER_SIZE, 0);
+        if (num_read > 0) {
+            buffer[num_read] = '\0';
+            process_command(client_fd, buffer);
+        } else {
+            perror("Recvfrom failed");
+        }
+    }
+
+    close(client_fd);
+    return NULL;
+}
+
+void *admin_connection_handler(void *arg) {
+    connection_thread_arg_t *connection_arg = (connection_thread_arg_t *)arg;
+    int server_fd = connection_arg->server_socket;
+
+    while (1) {
+        int client_fd = accept(server_fd, NULL, NULL);
+        if (client_fd == -1)
+            continue;
+
+        printf("Got new unix connection\n");
+
+        pthread_t client_thread;
+        client_thread_arg_t *arg = malloc(sizeof(client_thread_arg_t));
+        arg->socket = client_fd;
+        pthread_create(&client_thread, NULL, admin_handler, arg);
         pthread_detach(client_thread); // Do not wait for thread termination
     }
 }
@@ -224,13 +350,56 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    pthread_t ux_connection_thread;
+    pthread_t connection_thread;
     connection_thread_arg_t *connection_arg =
         malloc(sizeof(connection_thread_arg_t));
     connection_arg->server_socket = server_fd;
-    pthread_create(&ux_connection_thread, NULL, inet_connection_handler,
+    pthread_create(&connection_thread, NULL, client_connection_handler,
                    connection_arg);
+    pthread_detach(connection_thread); // The thread can run independently
+
+    int ux_server_fd;
+    struct sockaddr_un server_addr_ux;
+
+    // Setup socket
+    ux_server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    memset(&server_addr_ux, 0, sizeof(struct sockaddr_un));
+    server_addr_ux.sun_family = AF_UNIX;
+    strcpy(server_addr_ux.sun_path, UX_SOCKET_PATH);
+    unlink(UX_SOCKET_PATH);
+    bind(ux_server_fd, (struct sockaddr *)&server_addr_ux,
+         sizeof(server_addr_ux));
+    listen(ux_server_fd, MAX_SOCKET_CONNECTIONS);
+
+    pthread_t ux_connection_thread;
+    connection_thread_arg_t *ux_connection_arg =
+        malloc(sizeof(connection_thread_arg_t));
+    ux_connection_arg->server_socket = ux_server_fd;
+    pthread_create(&ux_connection_thread, NULL, client_connection_handler,
+                   ux_connection_arg);
     pthread_detach(ux_connection_thread); // The thread can run independently
+
+    int admin_ux_server_fd;
+    struct sockaddr_un admin_server_addr_ux;
+
+    // Setup admin socket
+    admin_ux_server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    memset(&admin_server_addr_ux, 0, sizeof(struct sockaddr_un));
+    admin_server_addr_ux.sun_family = AF_UNIX;
+    strcpy(admin_server_addr_ux.sun_path, ADMIN_SOCKET_PATH);
+    unlink(ADMIN_SOCKET_PATH);
+    bind(admin_ux_server_fd, (struct sockaddr *)&admin_server_addr_ux,
+         sizeof(admin_server_addr_ux));
+    listen(admin_ux_server_fd, 1);
+
+    pthread_t admin_ux_connection_thread;
+    connection_thread_arg_t *admin_ux_connection_arg =
+        malloc(sizeof(connection_thread_arg_t));
+    admin_ux_connection_arg->server_socket = admin_ux_server_fd;
+    pthread_create(&admin_ux_connection_thread, NULL, admin_connection_handler,
+                   admin_ux_connection_arg);
+    pthread_detach(
+        admin_ux_connection_thread); // The thread can run independently
 
     signal(SIGINT, shutdown_handler);
     signal(SIGTERM, shutdown_handler);
