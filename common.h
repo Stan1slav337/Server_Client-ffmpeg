@@ -1,6 +1,7 @@
 #include <stdio.h>
 
 #define UX_SOCKET_PATH "/tmp/server.sock"
+#define ADMIN_SOCKET_PATH "/tmp/server_admin.sock"
 #define BUFFER_SIZE 4096
 #define FILE_SIZE 256
 
