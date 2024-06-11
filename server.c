@@ -191,6 +191,7 @@ enum MHD_Result send_ws_response(struct MHD_Connection *connection, char *messag
     printf("%s\n", error_json);
     struct MHD_Response *response = MHD_create_response_from_buffer(strlen(error_json),
                                                                     (void *)error_json, MHD_RESPMEM_MUST_COPY);
+    MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
     int ret = MHD_queue_response(connection, success ? MHD_HTTP_OK : MHD_HTTP_BAD_REQUEST, response);
     MHD_destroy_response(response);
 
@@ -211,7 +212,7 @@ static int send_ws_file_response(struct MHD_Connection *connection, const char *
     rewind(file);
 
     // Create the response
-    
+
     struct MHD_Response *response = MHD_create_response_from_fd_at_offset64(size, fileno(file), 0);
     MHD_add_response_header(response, "Content-Type", "video/mp4");
     MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");
