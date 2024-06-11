@@ -36,7 +36,7 @@ void *encode_handler(void *arg);
 void send_response_file(int socket, char *filename, char *out_filename);
 
 // Thread function to handle each client
-void *client_handler(void *arg) {
+void *python_client_handler(void *arg) {
     client_thread_arg_t *client_data = (client_thread_arg_t *)arg;
     int client_fd = client_data->socket;
     free(client_data);
@@ -111,7 +111,97 @@ void *client_handler(void *arg) {
     return NULL;
 }
 
+// Thread function to handle each client
+void *client_handler(void *arg) {
+    client_thread_arg_t *client_data = (client_thread_arg_t *)arg;
+    int client_fd = client_data->socket;
+    free(client_data);
+
+    FILE *input_file = NULL;
+    char unique_filename[FILE_SIZE];
+    int unique_id = 1;
+
+    while (1) {
+        // Read header
+        size_t headerSize = sizeof(RequestHeader);
+        char header_buffer[headerSize];
+        receive_all(client_fd, header_buffer, headerSize);
+
+        for (int i = 0; i < 2; ++i) {
+            putchar(header_buffer[i]);
+        }
+        printf("\n");
+
+        // Cast the buffer to struct
+        RequestHeader req;
+        memcpy(&req, header_buffer, headerSize);
+
+        printf("%s\n%s\n", req.input_filename, req.output_filename);
+
+        // Create local file and receive from client
+        snprintf(unique_filename, sizeof(unique_filename), "%d_%d_%s",
+                 client_fd, unique_id, req.input_filename);
+        input_file = fopen(unique_filename, "wb");
+        receive_file(client_fd, input_file, req.length);
+        fclose(input_file);
+        input_file = NULL;
+        unique_id++;
+
+        // Start a new thread for processing
+        printf("File received, starting processing...\n");
+        pthread_t processing_thread;
+        file_processing_arg_t *processing_arg =
+            malloc(sizeof(file_processing_arg_t));
+        processing_arg->client_socket = client_fd;
+        strcpy(processing_arg->filename, unique_filename);
+        strcpy(processing_arg->out_filename, req.output_filename);
+        strcpy(processing_arg->encoder, req.encoder);
+
+        switch (req.operation) {
+        case kEncode:
+            pthread_create(&processing_thread, NULL, encode_handler,
+                           processing_arg);
+            break;
+
+        case kCut:
+            // pthread_create(&processing_thread, NULL, cut_handler,
+            // processing_arg);
+            break;
+
+        default:
+            printf("Unknown operation\n");
+            continue;
+        }
+
+        pthread_detach(processing_thread);
+    }
+
+    if (input_file)
+        fclose(input_file);
+    close(client_fd);
+    return NULL;
+}
+
 void *client_connection_handler(void *arg) {
+    connection_thread_arg_t *connection_arg = (connection_thread_arg_t *)arg;
+    int server_fd = connection_arg->server_socket;
+
+    while (1) {
+        int client_fd = accept(server_fd, NULL, NULL);
+        if (client_fd == -1)
+            continue;
+
+        printf("Got new ux connection\n");
+
+        pthread_t client_thread;
+        client_thread_arg_t *arg = malloc(sizeof(client_thread_arg_t));
+        arg->socket = client_fd;
+        pthread_create(&client_thread, NULL, client_handler, arg);
+        pthread_detach(client_thread); // Do not wait for thread termination
+    }
+}
+
+void *python_client_connection_handler(void *arg) {
     connection_thread_arg_t *connection_arg = (connection_thread_arg_t *)arg;
     int server_fd = connection_arg->server_socket;
 
@@ -125,7 +215,7 @@ void *client_connection_handler(void *arg) {
         pthread_t client_thread;
         client_thread_arg_t *arg = malloc(sizeof(client_thread_arg_t));
         arg->socket = client_fd;
-        pthread_create(&client_thread, NULL, client_handler, arg);
+        pthread_create(&client_thread, NULL, python_client_handler, arg);
         pthread_detach(client_thread); // Do not wait for thread termination
     }
 }
@@ -354,7 +444,7 @@ int main() {
     connection_thread_arg_t *connection_arg =
         malloc(sizeof(connection_thread_arg_t));
     connection_arg->server_socket = server_fd;
-    pthread_create(&connection_thread, NULL, client_connection_handler,
+    pthread_create(&connection_thread, NULL, python_client_connection_handler,
                    connection_arg);
     pthread_detach(connection_thread); // The thread can run independently
 
