@@ -7,6 +7,7 @@ add_compile_options(-Wall -Wextra)
 
 add_executable(client client.c)
 add_executable(server server.c)
+add_executable(client_admin client_admin.c)
 
 find_package(Threads REQUIRED)
 target_link_libraries(server PRIVATE Threads::Threads)

@@ -3,6 +3,7 @@
 #define UX_SOCKET_PATH "/tmp/server.sock"
 #define ADMIN_SOCKET_PATH "/tmp/server_admin.sock"
 #define BUFFER_SIZE 4096
+#define ADMIN_BUFFER_SIZE 1024
 #define FILE_SIZE 256
 
 typedef enum { kEncode = 1, kCut } OperationType;
@@ -12,7 +13,7 @@ typedef struct {
     char encoder[10];                // Encoder
     char input_filename[FILE_SIZE];  // Filename for input
     char output_filename[FILE_SIZE]; // Filename for output
-    long length;                     // Size of file
+    long long length;                // Size of file
 } RequestHeader;
 
 typedef struct {
@@ -41,14 +42,14 @@ void receive_all(int socket_fd, char *buffer, size_t bytes_total) {
     while (bytes_received < bytes_total) {
         bytes_received += read(socket_fd, buffer + bytes_received,
                                bytes_total - bytes_received);
-        printf("bytes received = %d\n", bytes_received);
+        printf("bytes received = %zu\n", bytes_received);
     }
 }
 
 void receive_file(int socket_fd, FILE *input_file, size_t file_length) {
     char buffer[BUFFER_SIZE];
     size_t bytes_received = 0UL;
-    printf("file_size = %d\n", file_length);
+    printf("file_size = %zu\n", file_length);
     int chunk = 0;
     while (bytes_received < file_length) {
         // read buffer size but maybe it's file end, so need less
