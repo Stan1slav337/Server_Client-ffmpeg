@@ -4,23 +4,18 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/socket.h>
-#include <sys/sysinfo.h>
 #include <sys/un.h>
 #include <unistd.h>
-#include <wait.h>
 
 #include "common.h"
 
 #define PORT 8080 // Define the port number for the server
 
 #define MAX_SOCKET_CONNECTIONS 128
-#define BUFFER_SIZE 1024
 
 typedef struct {
     int socket;
-    struct sockaddr addr;
 } client_thread_arg_t;
 
 typedef struct {
@@ -123,7 +118,7 @@ void *client_handler(void *arg) {
     return NULL;
 }
 
-void *client_connection_handler(void *arg) {
+void *inet_connection_handler(void *arg) {
     connection_thread_arg_t *connection_arg = (connection_thread_arg_t *)arg;
     int server_fd = connection_arg->server_socket;
 
@@ -229,37 +224,13 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    pthread_t connection_thread;
+    pthread_t ux_connection_thread;
     connection_thread_arg_t *connection_arg =
         malloc(sizeof(connection_thread_arg_t));
     connection_arg->server_socket = server_fd;
-    pthread_create(&connection_thread, NULL, client_connection_handler,
+    pthread_create(&ux_connection_thread, NULL, inet_connection_handler,
                    connection_arg);
-    pthread_detach(connection_thread); // The thread can run independently
-
-    int ux_server_fd;
-    struct sockaddr_un server_addr_ux;
-
-    // Setup socket
-    ux_server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    memset(&server_addr_ux, 0, sizeof(struct sockaddr_un));
-    server_addr_ux.sun_family = AF_UNIX;
-    strcpy(server_addr_ux.sun_path, UX_SOCKET_PATH);
-    unlink(UX_SOCKET_PATH);
-    bind(ux_server_fd, (struct sockaddr *)&server_addr_ux,
-         sizeof(server_addr_ux));
-    listen(ux_server_fd, MAX_SOCKET_CONNECTIONS);
-
-    pthread_t ux_connection_thread;
-    connection_thread_arg_t *ux_connection_arg =
-        malloc(sizeof(connection_thread_arg_t));
-    ux_connection_arg->server_socket = ux_server_fd;
-    pthread_create(&ux_connection_thread, NULL, client_connection_handler,
-                   ux_connection_arg);
     pthread_detach(ux_connection_thread); // The thread can run independently
-
-    int admin_ux_server_fd;
-    struct sockaddr_un admin_server_addr_ux;
 
     signal(SIGINT, shutdown_handler);
     signal(SIGTERM, shutdown_handler);
