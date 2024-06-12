@@ -20,14 +20,14 @@ typedef enum
 typedef struct
 {
     OperationType operation;
-    char encoder[10];                     // Encoder
-    char input_filename[FILE_SIZE];       // Filename for input
-    char input_filename_merge[FILE_SIZE]; // Filename for input merged
-    char output_filename[FILE_SIZE];      // Filename for output
+    char encoder[10];
+    char input_filename[FILE_SIZE];
+    char input_filename_merge[FILE_SIZE];
+    char output_filename[FILE_SIZE];
     char start_trim[10];
     char end_trim[10];
-    long long length; // Size of file
-    long long lengthMerged; // Size of file merged
+    long long length;
+    long long lengthMerged;
     double speed_rate;
 } RequestHeader;
 
