@@ -7,19 +7,15 @@ import threading
 CHUNK_SIZE = 4096
 FILE_SIZE = 256
 
-# Operation type assumed as constants
-OP_ENCODE = 1  # Example operation type for encoding
+OP_ENCODE = 1
 
-# Setup connection details
-SERVER_IP = '127.0.0.1'  # Assuming server is running on localhost
-SERVER_PORT = 8080       # Port number on which the server is listening
+SERVER_IP = '127.0.0.1' 
+SERVER_PORT = 8080       
 
 def send_header(sock, operation, encoder, input_filename, merge_input_filename, output_filename, file_size, merged_file_size, speed_rate, start_trim, end_trim):
-    # Create the request struct
     nr = 10
     request_format = f"i{nr}s{FILE_SIZE}s{FILE_SIZE}s{FILE_SIZE}s{nr}s{nr}sQQd"
-    #d{nr}s{nr}s
-    #, start_trim.encode(), end_trim.encode()
+
     request_data = struct.pack(request_format, operation, encoder.encode(), input_filename.encode(), merge_input_filename.encode(), output_filename.encode(), start_trim.encode(), end_trim.encode(), file_size, merged_file_size, speed_rate)
     sock.sendall(request_data)
 
@@ -27,7 +23,6 @@ def send_chunk(sock, chunk):
     sock.sendall(chunk)
 
 def receive_exact(sock, length):
-    """Receive exactly 'length' bytes from the socket 'sock'."""
     data = b''
     while len(data) < length:
         more = sock.recv(length - len(data))
@@ -56,7 +51,6 @@ def receive_file(sock):
         print(f"\nFile processed completely, output: {output_filename}")
 
 def option_encoding():
-    # Display encoder type choices
     print("Choose encoder type:")
     print("1. h264")
     print("2. h265")
@@ -64,7 +58,7 @@ def option_encoding():
     print("Enter your choice: ", end="")
 
     try:
-        encoder_choice = int(input())  # Get user input and convert to integer
+        encoder_choice = int(input())
     except ValueError:
         print("Please enter a valid number for the encoder type.")
         return
@@ -81,7 +75,6 @@ def option_encoding():
     
     return encoder
 
-# Function to validate the time format "HH:MM:SS"
 def is_valid_time_format(time_str):
     pattern = r'^\d{2}:\d{2}:\d{2}$'
     if re.match(pattern, time_str):
@@ -90,7 +83,6 @@ def is_valid_time_format(time_str):
 
 def main():
 
-    # Set up the socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.connect((SERVER_IP, SERVER_PORT))
 
@@ -111,18 +103,18 @@ def main():
 
         option = 1
         try:
-            option = int(input())  # Get user input and convert to integer
+            option = int(input()) 
         except ValueError:
             print("Please enter a valid number.")
             continue
         print("Enter input filename: ", end="")
-        input_filename = input()  # Get input filename
+        input_filename = input()  
         merge_input_filename = ""
         if option == 6:
             print("Enter another input filename: ", end="")
-            merge_input_filename = input()  # Get input filename
+            merge_input_filename = input()  
         print("Enter output filename: ", end="")
-        output_filename = input()  # Get output filenam
+        output_filename = input() 
 
         speed_rate = 1
         start_trim = "00:00:00"
@@ -135,22 +127,20 @@ def main():
             print("Select a speed rate between 0.5 and 2.0: ", end="")
             while True:
                 try:
-                    # Get user input and convert to float
                     speed_rate = float(input("Enter a speed rate between 0.5 and 2.0: "))
-                    # Check if the input value is within the allowed range
                     if speed_rate > 2.0 or speed_rate < 0.5:
                         raise ValueError("Please enter a valid float number between 0.5 and 2.0.")
-                    break  # If the value is valid, break out of the loop
+                    break
                 except ValueError:
                     print("Please enter a valid float number between 0.5 and 2.0.")
-                    # The loop will automatically continue if an exception is caught
+                   
         elif option == 3:
             print("Enter start time position of the trim in the HH:MM:SS format: ", end="")
-            start_trim = input()  # Get input filename
+            start_trim = input() 
             if not is_valid_time_format(start_trim):
                 raise ValueError("Please enter a valid position of the trim in the HH:MM:SS format.")
             print("Enter duration of the trim in the HH:MM:SS format: ", end="")
-            end_trim = input()  # Get output filenam
+            end_trim = input() 
             if not is_valid_time_format(end_trim):
                 raise ValueError("Please enter a duration of the trim in the HH:MM:SS format.")
         elif option == 4:
@@ -164,7 +154,7 @@ def main():
             continue
 
         if option == 1 or option == 2 or option == 3 or option == 4 or option == 5 or option == 6:
-            # Open the file and calculate chunks
+
             with open(input_filename, 'rb') as f:
                 f.seek(0, os.SEEK_END)
                 file_size = f.tell()

@@ -19,7 +19,7 @@
             <option value="6">Merge</option>
         </select><br><br>
 
-        <div id="additionalFields"></div> <!-- Placeholder for additional input fields -->
+        <div id="additionalFields"></div>
 
         <label for="fileInput">Input File:</label>
         <input type="file" id="fileInput"><br><br>
@@ -35,9 +35,8 @@
         function updateFormFields() {
             const operation = document.getElementById('operation').value;
             const additionalFields = document.getElementById('additionalFields');
-            additionalFields.innerHTML = ''; // Clear previous additional fields
+            additionalFields.innerHTML = ''; 
 
-            // Default for Encoder, visible for operation 1, 5
             const encoderHTML = `
                 <label for="encoder">Encoder:</label>
                 <select id="encoder">

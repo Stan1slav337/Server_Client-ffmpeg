@@ -1,6 +1,6 @@
-#include <arpa/inet.h> 
+#include <arpa/inet.h>
 #include <microhttpd.h>
-#include <netinet/in.h> 
+#include <netinet/in.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
@@ -240,7 +240,7 @@ void execute_system_command(int client_socket, const char *command)
     send(client_socket, response, response_len, 0);
 
     close(pipefd[0]);
-    wait(NULL); 
+    wait(NULL);
 }
 
 void process_command(int client_socket, char *command)
@@ -333,7 +333,7 @@ void *admin_connection_handler(void *arg)
         if (client_fd == -1)
             continue;
 
-        printf("Got new unix connection\n");
+        printf("Got new admin connection\n");
 
         pthread_t client_thread;
         client_thread_arg_t *arg = malloc(sizeof(client_thread_arg_t));
@@ -576,7 +576,6 @@ enum MHD_Result send_ws_response(struct MHD_Connection *connection,
     snprintf(error_json, sizeof(error_json),
              "{\"status\": \"%s\", \"message\": \"%s.\"}",
              success ? "success" : "error", message);
-    printf("%s\n", error_json);
     struct MHD_Response *response = MHD_create_response_from_buffer(
         strlen(error_json), (void *)error_json, MHD_RESPMEM_MUST_COPY);
     MHD_add_response_header(response, "Access-Control-Allow-Origin", "*");

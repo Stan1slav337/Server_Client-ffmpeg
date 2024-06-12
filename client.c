@@ -24,12 +24,10 @@ void *receive_handler(void *arg)
 
     while (1)
     {
-        // Read header
         size_t headerSize = sizeof(ResponseHeader);
         char header_buffer[headerSize];
         receive_all(server_fd, header_buffer, headerSize);
 
-        // Cast the buffer to struct
         ResponseHeader resp;
         memcpy(&resp, header_buffer, headerSize);
 
@@ -103,7 +101,6 @@ int main()
     struct sockaddr_un server_addr;
     RequestHeader req;
 
-    // Create socket
     sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sock_fd == -1)
     {
@@ -118,7 +115,6 @@ int main()
     server_addr.sun_family = AF_UNIX;
     strcpy(server_addr.sun_path, UX_SOCKET_PATH);
 
-    // Connect to server
     if (connect(sock_fd, (struct sockaddr *)&server_addr,
                 sizeof(server_addr)) == -1)
     {
@@ -130,9 +126,8 @@ int main()
     receive_thread_arg_t *receive_arg = malloc(sizeof(receive_thread_arg_t));
     receive_arg->socket = sock_fd;
     pthread_create(&receive_thread, NULL, receive_handler, receive_arg);
-    pthread_detach(receive_thread); // Do not wait for thread termination
+    pthread_detach(receive_thread);
 
-    // User Interface
     while (1)
     {
         printf("Available Functions:\n");
@@ -187,7 +182,6 @@ int main()
             continue;
         }
 
-        // Open file to determine the number of chunks
         FILE *file = fopen(req.input_filename, "rb");
         if (!file)
         {
@@ -196,7 +190,6 @@ int main()
             return -1;
         }
 
-        // Determine file size and number of chunks
         fseek(file, 0, SEEK_END);
         req.length = ftell(file);
         rewind(file);
@@ -204,7 +197,6 @@ int main()
         FILE *file_merged = NULL;
         if (req.operation == kMerge)
         {
-            // Open file to determine the number of chunks
             file_merged = fopen(req.input_filename_merge, "rb");
             if (!file_merged)
             {
@@ -212,7 +204,6 @@ int main()
                 close(sock_fd);
                 return -1;
             }
-            // Determine file size and number of chunks
             fseek(file_merged, 0, SEEK_END);
             req.lengthMerged = ftell(file_merged);
             rewind(file_merged);
