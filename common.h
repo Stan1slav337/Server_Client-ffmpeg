@@ -7,17 +7,23 @@
 #define ADMIN_BUFFER_SIZE 1024
 #define FILE_SIZE 256
 
-typedef enum { kEncode = 1, kSpeed = 2, kTrim = 3, kCut } OperationType;
+typedef enum {
+    kEncode = 1,
+    kSpeed,
+    kTrim,
+    kExtractAudio,
+    kConvert
+} OperationType;
 
 typedef struct {
     OperationType operation;
     char encoder[10];                // Encoder
     char input_filename[FILE_SIZE];  // Filename for input
     char output_filename[FILE_SIZE]; // Filename for output
-    long long length;                // Size of file
-    double speed_rate;
     char start_trim[10];
-    char trim_duration[10];
+    char end_trim[10];
+    long long length; // Size of file
+    double speed_rate;
 } RequestHeader;
 
 typedef struct {

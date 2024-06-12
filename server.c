@@ -34,9 +34,9 @@ typedef struct {
     char filename[FILE_SIZE];
     char out_filename[FILE_SIZE];
     char encoder[10];
-    double speed_rate;
     char trim_start[10];
     char trim_duration[10];
+    double speed_rate;
 } file_processing_arg_t;
 
 void *encode_handler(void *arg);
@@ -69,8 +69,8 @@ void *python_client_handler(void *arg) {
         RequestHeader req;
         memcpy(&req, header_buffer, headerSize);
 
-        printf("%s\n%s\n%lf\n", req.input_filename, req.output_filename,
-               req.speed_rate);
+        // printf("%s\n%s\n%lf\n", req.input_filename, req.output_filename,
+        //        req.speed_rate);
 
         // Create local file and receive from client
         snprintf(unique_filename, sizeof(unique_filename), "%d_%d_%s",
@@ -92,10 +92,10 @@ void *python_client_handler(void *arg) {
         strcpy(processing_arg->out_filename, req.output_filename);
         strcpy(processing_arg->encoder, req.encoder);
         strcpy(processing_arg->trim_start, req.start_trim);
-        strcpy(processing_arg->trim_duration, req.trim_duration);
+        strcpy(processing_arg->trim_duration, req.end_trim);
         processing_arg->speed_rate = req.speed_rate;
 
-        printf("%s\n%s\n", req.start_trim, req.trim_duration);
+        printf("%s\n%s\n", req.start_trim, req.end_trim);
 
         switch (req.operation) {
         case kEncode:
@@ -179,11 +179,6 @@ void *client_handler(void *arg) {
         case kEncode:
             pthread_create(&processing_thread, NULL, encode_handler,
                            processing_arg);
-            break;
-
-        case kCut:
-            // pthread_create(&processing_thread, NULL, cut_handler,
-            // processing_arg);
             break;
 
         default:
@@ -439,11 +434,17 @@ void ffmpeg_trim(char *filename, char *trim_start, char *trim_duration,
     *output_filename = malloc(out_size);
     snprintf(*output_filename, out_size, "encoded_%s", filename);
 
+    char *start_1 = "0:01";
+    char *end_1 = "0:03";
+    char *nputfile = "a.mp4";
+
+    printf("IN TRIM FUNCTION\n");
+
     // Construct FFmpeg command to change the video speed
     char command[1024];
     snprintf(command, sizeof(command),
-             "ffmpeg -i \"%s\" -ss %s -t %s -c copy \"%s\"", filename,
-             trim_start, trim_duration, *output_filename);
+             "ffmpeg -i \"%s\" -ss %s -to %s -c copy \"%s\"", nputfile, start_1,
+             end_1, "b_trim.mp4");
 
     // Execute FFmpeg command
     system(command);
@@ -633,11 +634,6 @@ enum MHD_Result answer_to_connection(void *cls,
             case kEncode:
                 ffmpeg_encode(con_info->filename, con_info->encoder,
                               &output_filename);
-                break;
-
-            case kCut:
-                // ffmpeg_cut(con_info->filename, con_info->encoder,
-                // output_filename);
                 break;
 
             default:

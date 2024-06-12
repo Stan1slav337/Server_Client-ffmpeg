@@ -17,8 +17,10 @@ SERVER_PORT = 8080       # Port number on which the server is listening
 def send_header(sock, operation, encoder, input_filename, output_filename, file_size, speed_rate, start_trim, end_trim):
     # Create the request struct
     nr = 10
-    request_format = f"i{nr}s{FILE_SIZE}s{FILE_SIZE}sQd{nr}s{nr}s"
-    request_data = struct.pack(request_format, operation, encoder.encode(), input_filename.encode(), output_filename.encode(), file_size, speed_rate, start_trim.encode(), end_trim.encode())
+    request_format = f"i{nr}s{FILE_SIZE}s{FILE_SIZE}s{nr}s{nr}sQd"
+    #d{nr}s{nr}s
+    #, start_trim.encode(), end_trim.encode()
+    request_data = struct.pack(request_format, operation, encoder.encode(), input_filename.encode(), output_filename.encode(), start_trim.encode(), end_trim.encode(), file_size, speed_rate)
     #print("Request data = ", request_data)
     sock.sendall(request_data)
 
@@ -51,14 +53,6 @@ def receive_file(sock):
 
     # Print filename and size for debugging
     print(f"Received filename: {output_filename}, File size: {file_size}")
-
-
-    # # Use bytes directly or decode safely
-    # try:
-    #     output_filename = output_filename_bytes.decode('utf-8').strip('\x00')
-    # except UnicodeDecodeError:
-    #     output_filename = "default_filename"
-    #     print("Failed to decode filename, using default.")
 
     with open(output_filename, 'wb') as file:
         remaining_size = file_size
