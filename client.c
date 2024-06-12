@@ -11,16 +11,19 @@
 
 int sock_fd;
 
-typedef struct {
+typedef struct
+{
     int socket;
 } receive_thread_arg_t;
 
-void *receive_handler(void *arg) {
+void *receive_handler(void *arg)
+{
     receive_thread_arg_t *receive_data = (receive_thread_arg_t *)arg;
     int server_fd = receive_data->socket;
     free(receive_data);
 
-    while (1) {
+    while (1)
+    {
         // Read header
         size_t headerSize = sizeof(ResponseHeader);
         char header_buffer[headerSize];
@@ -31,7 +34,8 @@ void *receive_handler(void *arg) {
         memcpy(&resp, header_buffer, headerSize);
 
         FILE *file = fopen(resp.output_filename, "wb");
-        if (!file) {
+        if (!file)
+        {
             perror("Failed to open file for writing");
             return NULL;
         }
@@ -43,7 +47,8 @@ void *receive_handler(void *arg) {
     }
 }
 
-void option_encoding(RequestHeader *req) {
+void option_encoding(RequestHeader *req)
+{
     req->operation = kEncode;
     printf("Choose encoder type:\n");
     printf("1. h264\n");
@@ -53,7 +58,8 @@ void option_encoding(RequestHeader *req) {
 
     int encoder_choice;
     scanf("%d", &encoder_choice);
-    switch (encoder_choice) {
+    switch (encoder_choice)
+    {
     case 1:
         strcpy(req->encoder, "libx264");
         break;
@@ -69,14 +75,16 @@ void option_encoding(RequestHeader *req) {
     }
 }
 
-void option_speed(RequestHeader *req) {
+void option_speed(RequestHeader *req)
+{
     req->operation = kSpeed;
     printf("Enter a speed rate between 0.5 and 2.0: ");
 
     scanf("%lf", &req->speed_rate);
 }
 
-void option_trim(RequestHeader *req) {
+void option_trim(RequestHeader *req)
+{
     req->operation = kTrim;
     printf("Enter start time position of the trim in the HH:MM:SS format: ");
     scanf("%s", &req->start_trim);
@@ -84,18 +92,21 @@ void option_trim(RequestHeader *req) {
     scanf("%s", &req->end_trim);
 }
 
-void shutdown_handler(int sig) {
+void shutdown_handler(int sig)
+{
     close(sock_fd);
     exit(0);
 }
 
-int main() {
+int main()
+{
     struct sockaddr_un server_addr;
     RequestHeader req;
 
     // Create socket
     sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (sock_fd == -1) {
+    if (sock_fd == -1)
+    {
         perror("socket");
         exit(EXIT_FAILURE);
     }
@@ -109,7 +120,8 @@ int main() {
 
     // Connect to server
     if (connect(sock_fd, (struct sockaddr *)&server_addr,
-                sizeof(server_addr)) == -1) {
+                sizeof(server_addr)) == -1)
+    {
         perror("connect");
         exit(EXIT_FAILURE);
     }
@@ -121,23 +133,31 @@ int main() {
     pthread_detach(receive_thread); // Do not wait for thread termination
 
     // User Interface
-    while (1) {
+    while (1)
+    {
         printf("Available Functions:\n");
         printf("1. Encode video/audio\n");
         printf("2. Change speed of video/audio\n");
         printf("3. Trim video/audio\n");
         printf("4. Extract audio from video\n");
         printf("5. Convert video/audio format\n");
+        printf("6. Merge 2 videos/audios\n");
         printf("Select an option: ");
         int option;
         scanf("%d", &option);
 
         printf("Enter input filename: ");
         scanf("%s", req.input_filename);
+        if (option == 6)
+        {
+            printf("Enter another input filename: ");
+            scanf("%s", req.input_filename_merge);
+        }
         printf("Enter output filename: ");
         scanf("%s", req.output_filename);
 
-        switch (option) {
+        switch (option)
+        {
         case 1:
             option_encoding(&req);
             break;
@@ -158,6 +178,10 @@ int main() {
             req.operation = kConvert;
             break;
 
+        case 6:
+            req.operation = kMerge;
+            break;
+
         default:
             printf("Invalid option\n");
             continue;
@@ -165,7 +189,17 @@ int main() {
 
         // Open file to determine the number of chunks
         FILE *file = fopen(req.input_filename, "rb");
-        if (!file) {
+        if (!file)
+        {
+            perror("Failed to open file");
+            close(sock_fd);
+            return -1;
+        }
+
+        // Open file to determine the number of chunks
+        FILE *file_merged = fopen(req.input_filename_merge, "rb");
+        if (!file)
+        {
             perror("Failed to open file");
             close(sock_fd);
             return -1;
@@ -176,8 +210,14 @@ int main() {
         req.length = ftell(file);
         rewind(file);
 
+        // Determine file size and number of chunks
+        fseek(file_merged, 0, SEEK_END);
+        req.lengthMerged = ftell(file_merged);
+        rewind(file_merged);
+
         send_all(sock_fd, (char *)&req, sizeof(RequestHeader));
         send_file(sock_fd, file);
+        send_file(sock_fd, file_merged);
         fclose(file);
     }
 
