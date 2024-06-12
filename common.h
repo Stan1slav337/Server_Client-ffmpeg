@@ -22,10 +22,10 @@ typedef struct
     char encoder[10];                // Encoder
     char input_filename[FILE_SIZE];  // Filename for input
     char output_filename[FILE_SIZE]; // Filename for output
-    long long length;                // Size of file
-    double speed_rate;
     char start_trim[10];
     char end_trim[10];
+    long long length; // Size of file
+    double speed_rate;
 } RequestHeader;
 
 typedef struct

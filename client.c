@@ -138,6 +138,7 @@ int main()
         printf("2. Change speed of video/audio\n");
         printf("3. Trim video/audio\n");
         printf("4. Extract audio from video\n");
+        printf("5. Convert video/audio format\n");
         printf("Select an option: ");
         int option;
         scanf("%d", &option);
