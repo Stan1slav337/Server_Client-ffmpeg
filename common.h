@@ -7,61 +7,52 @@
 #define ADMIN_BUFFER_SIZE 1024
 #define FILE_SIZE 256
 
-typedef enum
-{
-    kEncode = 1,
-    kCut
-} OperationType;
+typedef enum { kEncode = 1, kSpeed = 2, kTrim = 3, kCut } OperationType;
 
-typedef struct
-{
+typedef struct {
     OperationType operation;
     char encoder[10];                // Encoder
     char input_filename[FILE_SIZE];  // Filename for input
     char output_filename[FILE_SIZE]; // Filename for output
     long long length;                // Size of file
+    double speed_rate;
+    char start_trim[10];
+    char trim_duration[10];
 } RequestHeader;
 
-typedef struct
-{
+typedef struct {
     char output_filename[FILE_SIZE];
     long length;
 } ResponseHeader;
 
-void send_all(int sockfd, const char *data, size_t total_bytes)
-{
+void send_all(int sockfd, const char *data, size_t total_bytes) {
     size_t bytes_sent = 0;
-    while (bytes_sent < total_bytes)
-    {
-        bytes_sent += write(sockfd, data + bytes_sent, total_bytes - bytes_sent);
+    while (bytes_sent < total_bytes) {
+        bytes_sent +=
+            write(sockfd, data + bytes_sent, total_bytes - bytes_sent);
     }
 }
 
-void send_file(int socket_fd, FILE *file)
-{
+void send_file(int socket_fd, FILE *file) {
     char buffer[BUFFER_SIZE];
     size_t bytes_read = 0;
-    while ((bytes_read = fread(buffer, 1, BUFFER_SIZE, file)) > 0)
-    {
+    while ((bytes_read = fread(buffer, 1, BUFFER_SIZE, file)) > 0) {
         send_all(socket_fd, buffer, bytes_read);
     }
 }
 
-void receive_all(int socket_fd, char *buffer, size_t bytes_total)
-{
+void receive_all(int socket_fd, char *buffer, size_t bytes_total) {
     size_t bytes_received = 0UL;
-    while (bytes_received < bytes_total)
-    {
-        bytes_received += read(socket_fd, buffer + bytes_received, bytes_total - bytes_received);
+    while (bytes_received < bytes_total) {
+        bytes_received += read(socket_fd, buffer + bytes_received,
+                               bytes_total - bytes_received);
     }
 }
 
-void receive_file(int socket_fd, FILE *input_file, size_t file_length)
-{
+void receive_file(int socket_fd, FILE *input_file, size_t file_length) {
     char buffer[BUFFER_SIZE];
     size_t bytes_received = 0UL;
-    while (bytes_received < file_length)
-    {
+    while (bytes_received < file_length) {
         int diff = file_length - bytes_received;
         if (diff == 0)
             break;

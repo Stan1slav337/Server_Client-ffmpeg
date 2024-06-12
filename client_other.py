@@ -1,6 +1,7 @@
 import socket
 import struct
 import os
+import re
 
 # Constants matching the C definitions
 CHUNK_SIZE = 4096
@@ -13,11 +14,11 @@ OP_ENCODE = 1  # Example operation type for encoding
 SERVER_IP = '127.0.0.1'  # Assuming server is running on localhost
 SERVER_PORT = 8080       # Port number on which the server is listening
 
-def send_header(sock, operation, encoder, input_filename, output_filename, file_size):
+def send_header(sock, operation, encoder, input_filename, output_filename, file_size, speed_rate, start_trim, end_trim):
     # Create the request struct
     nr = 10
-    request_format = f"i{nr}s{FILE_SIZE}s{FILE_SIZE}sQ"
-    request_data = struct.pack(request_format, operation, encoder.encode(), input_filename.encode(), output_filename.encode(), file_size)
+    request_format = f"i{nr}s{FILE_SIZE}s{FILE_SIZE}sQd{nr}s{nr}s"
+    request_data = struct.pack(request_format, operation, encoder.encode(), input_filename.encode(), output_filename.encode(), file_size, speed_rate, start_trim.encode(), end_trim.encode())
     #print("Request data = ", request_data)
     sock.sendall(request_data)
 
@@ -96,6 +97,13 @@ def option_encoding():
     
     return encoder
 
+# Function to validate the time format "HH:MM:SS"
+def is_valid_time_format(time_str):
+    pattern = r'^\d{2}:\d{2}:\d{2}$'
+    if re.match(pattern, time_str):
+        return True
+    return False
+
 def main():
 
     while 1:
@@ -106,7 +114,9 @@ def main():
             sock.connect((SERVER_IP, SERVER_PORT))
 
             print("Available Functions:")
-            print("1. Encode video")
+            print("1. Encode video/audio")
+            print("2. Change speed of video/audio")
+            print("3. Trim video/audio")
             print("Select an option: ", end="")
             option = 1
             try:
@@ -119,21 +129,50 @@ def main():
             print("Enter output filename: ", end="")
             output_filename = input()  # Get output filenam
 
+            speed_rate = 1
+            start_trim = "00:00:00"
+            end_trim = "00:00:00"
+            encoder = "libx264"
+
+            print("option = ", option)
+
 
             if option == 1:
                 encoder = option_encoding()
+            elif option == 2:
+                print("Select a speed rate between 0.5 and 2.0: ", end="")
+                while True:
+                    try:
+                        # Get user input and convert to float
+                        speed_rate = float(input("Enter a speed rate between 0.5 and 2.0: "))
+                        # Check if the input value is within the allowed range
+                        if speed_rate > 2.0 or speed_rate < 0.5:
+                            raise ValueError("Please enter a valid float number between 0.5 and 2.0.")
+                        break  # If the value is valid, break out of the loop
+                    except ValueError:
+                        print("Please enter a valid float number between 0.5 and 2.0.")
+                        # The loop will automatically continue if an exception is caught
+            elif option == 3:
+                print("Enter start time position of the trim in the HH:MM:SS format: ", end="")
+                start_trim = input()  # Get input filename
+                if not is_valid_time_format(start_trim):
+                    raise ValueError("Please enter a valid position of the trim in the HH:MM:SS format.")
+                print("Enter duration of the trim in the HH:MM:SS format: ", end="")
+                end_trim = input()  # Get output filenam
+                if not is_valid_time_format(end_trim):
+                    raise ValueError("Please enter a duration of the trim in the HH:MM:SS format.")
+            else:
+                print("Invalid option")
+                continue
 
-                # input_filename = 'input.mp4'
-                # output_filename = 'output.mp4'
-                # encoder = 'libx264'  # Example encoder
-
+            if option == 1 or option == 2 or option == 3:
                 # Open the file and calculate chunks
                 with open(input_filename, 'rb') as f:
                     f.seek(0, os.SEEK_END)
                     file_size = f.tell()
                     f.seek(0)
                     print("file_size = ", file_size)
-                    send_header(sock, OP_ENCODE, encoder, input_filename, output_filename, file_size)
+                    send_header(sock, option, encoder, input_filename, output_filename, file_size, speed_rate, start_trim, end_trim)
                     print("SENT HEADER")
 
                     remaining_chunks = (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
@@ -146,9 +185,6 @@ def main():
                 # Receive the processed file
                 print("Receiving processed file...")
                 receive_file(sock)
-            else:
-                print("Invalid option")
-                continue
 
         finally:
             sock.close()
