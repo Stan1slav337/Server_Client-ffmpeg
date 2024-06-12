@@ -10,8 +10,10 @@
 typedef enum
 {
     kEncode = 1,
-    kCut,
-    kExtractAudio
+    kSpeed,
+    kTrim,
+    kExtractAudio,
+    kConvert
 } OperationType;
 
 typedef struct
@@ -21,6 +23,9 @@ typedef struct
     char input_filename[FILE_SIZE];  // Filename for input
     char output_filename[FILE_SIZE]; // Filename for output
     long long length;                // Size of file
+    double speed_rate;
+    char start_trim[10];
+    char end_trim[10];
 } RequestHeader;
 
 typedef struct

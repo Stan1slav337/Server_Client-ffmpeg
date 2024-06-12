@@ -37,10 +37,15 @@ typedef struct
     char filename[FILE_SIZE];
     char out_filename[FILE_SIZE];
     char encoder[10];
+    double speed_rate;
+    char start_trim[10];
+    char end_trim[10];
 } file_processing_arg_t;
 
 void *encode_handler(void *arg);
 void *audio_extract_handler(void *arg);
+void *speed_handler(void *arg);
+void *trim_handler(void *arg);
 void send_response_file(int socket, char *filename, char *out_filename);
 
 // Thread function to handle each client
@@ -92,6 +97,9 @@ void *python_client_handler(void *arg)
         strcpy(processing_arg->filename, unique_filename);
         strcpy(processing_arg->out_filename, req.output_filename);
         strcpy(processing_arg->encoder, req.encoder);
+        strcpy(processing_arg->start_trim, req.start_trim);
+        strcpy(processing_arg->end_trim, req.end_trim);
+        processing_arg->speed_rate = req.speed_rate;
 
         switch (req.operation)
         {
@@ -101,10 +109,15 @@ void *python_client_handler(void *arg)
                            processing_arg);
             return NULL;
 
-        case kCut:
-            // pthread_create(&processing_thread, NULL, cut_handler,
-            // processing_arg);
-            break;
+        case kSpeed:
+            pthread_create(&processing_thread, NULL, speed_handler,
+                           processing_arg);
+            return NULL;
+
+        case kTrim:
+            pthread_create(&processing_thread, NULL, trim_handler,
+                           processing_arg);
+            return NULL;
 
         case kExtractAudio:
             pthread_create(&processing_thread, NULL, audio_extract_handler,
@@ -175,6 +188,9 @@ void *client_handler(void *arg)
         strcpy(processing_arg->filename, unique_filename);
         strcpy(processing_arg->out_filename, req.output_filename);
         strcpy(processing_arg->encoder, req.encoder);
+        strcpy(processing_arg->start_trim, req.start_trim);
+        strcpy(processing_arg->end_trim, req.end_trim);
+        processing_arg->speed_rate = req.speed_rate;
 
         switch (req.operation)
         {
@@ -183,9 +199,14 @@ void *client_handler(void *arg)
                            processing_arg);
             break;
 
-        case kCut:
-            // pthread_create(&processing_thread, NULL, cut_handler,
-            // processing_arg);
+        case kSpeed:
+            pthread_create(&processing_thread, NULL, speed_handler,
+                           processing_arg);
+            break;
+
+        case kTrim:
+            pthread_create(&processing_thread, NULL, trim_handler,
+                           processing_arg);
             break;
 
         case kExtractAudio:
@@ -441,12 +462,77 @@ void *encode_handler(void *arg)
                        data->out_filename);
 }
 
+void ffmpeg_speed(char *filename, double speed_rate, char **output_filename)
+{
+    printf("Starting encoding process for file %s...\n", filename);
+    int out_size = strlen(filename) + 10;
+    *output_filename = malloc(out_size);
+    snprintf(*output_filename, out_size, "speeded_%s", filename);
+
+    // Construct FFmpeg command to change the video speed
+    char command[1024];
+    snprintf(command, sizeof(command),
+             "ffmpeg -i \"%s\" -filter:v \"setpts=PTS/%f\" -filter:a "
+             "\"atempo=%f\" \"%s\"",
+             filename, speed_rate, speed_rate, *output_filename);
+
+    // Execute FFmpeg command
+    system(command);
+
+    printf("Speed change completed for file %s, output in %s\n", filename,
+           *output_filename);
+}
+
+void *speed_handler(void *arg)
+{
+    file_processing_arg_t *data = (file_processing_arg_t *)arg;
+
+    char *output_filename;
+    ffmpeg_speed(data->filename, data->speed_rate, &output_filename);
+
+    send_response_file(data->client_socket, output_filename,
+                       data->out_filename);
+}
+
+void ffmpeg_trim(char *filename, char *start_trim, char *end_trim,
+                 char **output_filename)
+{
+    printf("Starting encoding process for file %s...\n", filename);
+    int out_size = strlen(filename) + 10;
+    *output_filename = malloc(out_size);
+    snprintf(*output_filename, out_size, "trimmed_%s", filename);
+
+    // Construct FFmpeg command to change the video speed
+    char command[1024];
+    snprintf(command, sizeof(command),
+             "ffmpeg -i \"%s\" -ss %s -to %s -c copy \"%s\"", filename,
+             start_trim, end_trim, *output_filename);
+
+    // Execute FFmpeg command
+    system(command);
+
+    printf("Trim completed for file %s, output in %s\n", filename,
+           *output_filename);
+}
+
+void *trim_handler(void *arg)
+{
+    file_processing_arg_t *data = (file_processing_arg_t *)arg;
+
+    char *output_filename;
+    ffmpeg_trim(data->filename, data->start_trim, data->end_trim,
+                &output_filename);
+
+    send_response_file(data->client_socket, output_filename,
+                       data->out_filename);
+}
+
 void ffmpeg_audio_extract(char *filename, char **output_filename)
 {
     printf("Starting audio extract process for file %s...\n", filename);
     int out_size = strlen(filename) + 10;
     *output_filename = malloc(out_size);
-    snprintf(*output_filename, out_size, "encoded_%s", filename);
+    snprintf(*output_filename, out_size, "extracted_%s", filename);
 
     // Construct FFmpeg command to encode the video
     char command[1024];
@@ -668,10 +754,10 @@ enum MHD_Result answer_to_connection(void *cls,
                               &output_filename);
                 break;
 
-            case kCut:
-                // ffmpeg_cut(con_info->filename, con_info->encoder,
-                // output_filename);
-                break;
+            // case kCut:
+            //     // ffmpeg_cut(con_info->filename, con_info->encoder,
+            //     // output_filename);
+            //     break;
 
             default:
                 printf("Unknown operation from client\n");

@@ -74,6 +74,23 @@ void option_encoding(RequestHeader *req)
     }
 }
 
+void option_speed(RequestHeader *req)
+{
+    req->operation = kSpeed;
+    printf("Enter a speed rate between 0.5 and 2.0: ");
+
+    scanf("%lf", &req->speed_rate);
+}
+
+void option_trim(RequestHeader *req)
+{
+    req->operation = kTrim;
+    printf("Enter start time position of the trim in the HH:MM:SS format: ");
+    scanf("%s", &req->start_trim);
+    printf("Enter end time position of the trim in the HH:MM:SS format: ");
+    scanf("%s", &req->end_trim);
+}
+
 void shutdown_handler(int sig)
 {
     close(sock_fd);
@@ -117,9 +134,9 @@ int main()
     while (1)
     {
         printf("Available Functions:\n");
-        printf("1. Encode video\n");
-        // printf("1. Encode video\n");
-        // printf("1. Encode video\n");
+        printf("1. Encode video/audio\n");
+        printf("2. Change speed of video/audio\n");
+        printf("3. Trim video/audio\n");
         printf("4. Extract audio from video\n");
         printf("Select an option: ");
         int option;
@@ -136,8 +153,20 @@ int main()
             option_encoding(&req);
             break;
 
+        case 2:
+            option_speed(&req);
+            break;
+
+        case 3:
+            option_trim(&req);
+            break;
+
         case 4:
             req.operation = kExtractAudio;
+            break;
+
+        case 5:
+            req.operation = kConvert;
             break;
 
         default:
