@@ -16,35 +16,36 @@
 
 #define PORT 8080 // Define the port number for the server
 
-#define PORT 8080 // Define the port number for the server
-
 #define MAX_SOCKET_CONNECTIONS 128
 
-typedef struct
-{
+typedef struct {
     int socket;
     struct sockaddr addr;
 } client_thread_arg_t;
 
-typedef struct
-{
+typedef struct {
     int server_socket;
 } connection_thread_arg_t;
 
-typedef struct
-{
+typedef struct {
     int client_socket;
     char filename[FILE_SIZE];
     char out_filename[FILE_SIZE];
     char encoder[10];
+    char start_trim[10];
+    char end_trim[10];
+    double speed_rate;
 } file_processing_arg_t;
 
 void *encode_handler(void *arg);
+void *audio_extract_handler(void *arg);
+void *speed_handler(void *arg);
+void *trim_handler(void *arg);
+void *convert_handler(void *arg);
 void send_response_file(int socket, char *filename, char *out_filename);
 
 // Thread function to handle each client
-void *python_client_handler(void *arg)
-{
+void *python_client_handler(void *arg) {
     client_thread_arg_t *client_data = (client_thread_arg_t *)arg;
     int client_fd = client_data->socket;
     free(client_data);
@@ -53,15 +54,13 @@ void *python_client_handler(void *arg)
     char unique_filename[FILE_SIZE + 30];
     int unique_id = 1;
 
-    while (1)
-    {
+    while (1) {
         // Read header
         size_t headerSize = sizeof(RequestHeader);
         char header_buffer[headerSize];
         receive_all(client_fd, header_buffer, headerSize);
 
-        for (int i = 0; i < 2; ++i)
-        {
+        for (int i = 0; i < 2; ++i) {
             putchar(header_buffer[i]);
         }
         printf("\n");
@@ -91,19 +90,36 @@ void *python_client_handler(void *arg)
         strcpy(processing_arg->filename, unique_filename);
         strcpy(processing_arg->out_filename, req.output_filename);
         strcpy(processing_arg->encoder, req.encoder);
+        strcpy(processing_arg->start_trim, req.start_trim);
+        strcpy(processing_arg->end_trim, req.end_trim);
+        processing_arg->speed_rate = req.speed_rate;
 
-        switch (req.operation)
-        {
+        switch (req.operation) {
         case kEncode:
             printf("RIGHT OPERATION\n");
             pthread_create(&processing_thread, NULL, encode_handler,
                            processing_arg);
             return NULL;
 
-        case kCut:
-            // pthread_create(&processing_thread, NULL, cut_handler,
-            // processing_arg);
-            break;
+        case kSpeed:
+            pthread_create(&processing_thread, NULL, speed_handler,
+                           processing_arg);
+            return NULL;
+
+        case kTrim:
+            pthread_create(&processing_thread, NULL, trim_handler,
+                           processing_arg);
+            return NULL;
+
+        case kExtractAudio:
+            pthread_create(&processing_thread, NULL, audio_extract_handler,
+                           processing_arg);
+            return NULL;
+
+        case kConvert:
+            pthread_create(&processing_thread, NULL, convert_handler,
+                           processing_arg);
+            return NULL;
 
         default:
             printf("Unknown operation\n");
@@ -120,8 +136,7 @@ void *python_client_handler(void *arg)
 }
 
 // Thread function to handle each client
-void *client_handler(void *arg)
-{
+void *client_handler(void *arg) {
     client_thread_arg_t *client_data = (client_thread_arg_t *)arg;
     int client_fd = client_data->socket;
     free(client_data);
@@ -130,15 +145,13 @@ void *client_handler(void *arg)
     char unique_filename[FILE_SIZE + 30];
     int unique_id = 1;
 
-    while (1)
-    {
+    while (1) {
         // Read header
         size_t headerSize = sizeof(RequestHeader);
         char header_buffer[headerSize];
         receive_all(client_fd, header_buffer, headerSize);
 
-        for (int i = 0; i < 2; ++i)
-        {
+        for (int i = 0; i < 2; ++i) {
             putchar(header_buffer[i]);
         }
         printf("\n");
@@ -169,17 +182,34 @@ void *client_handler(void *arg)
         strcpy(processing_arg->filename, unique_filename);
         strcpy(processing_arg->out_filename, req.output_filename);
         strcpy(processing_arg->encoder, req.encoder);
+        strcpy(processing_arg->start_trim, req.start_trim);
+        strcpy(processing_arg->end_trim, req.end_trim);
+        processing_arg->speed_rate = req.speed_rate;
 
-        switch (req.operation)
-        {
+        switch (req.operation) {
         case kEncode:
             pthread_create(&processing_thread, NULL, encode_handler,
                            processing_arg);
             break;
 
-        case kCut:
-            // pthread_create(&processing_thread, NULL, cut_handler,
-            // processing_arg);
+        case kSpeed:
+            pthread_create(&processing_thread, NULL, speed_handler,
+                           processing_arg);
+            break;
+
+        case kTrim:
+            pthread_create(&processing_thread, NULL, trim_handler,
+                           processing_arg);
+            break;
+
+        case kExtractAudio:
+            pthread_create(&processing_thread, NULL, audio_extract_handler,
+                           processing_arg);
+            break;
+
+        case kConvert:
+            pthread_create(&processing_thread, NULL, convert_handler,
+                           processing_arg);
             break;
 
         default:
@@ -196,13 +226,11 @@ void *client_handler(void *arg)
     return NULL;
 }
 
-void *ux_connection_handler(void *arg)
-{
+void *ux_connection_handler(void *arg) {
     connection_thread_arg_t *connection_arg = (connection_thread_arg_t *)arg;
     int server_fd = connection_arg->server_socket;
 
-    while (1)
-    {
+    while (1) {
         int client_fd = accept(server_fd, NULL, NULL);
         if (client_fd == -1)
             continue;
@@ -217,13 +245,11 @@ void *ux_connection_handler(void *arg)
     }
 }
 
-void *python_client_connection_handler(void *arg)
-{
+void *python_client_connection_handler(void *arg) {
     connection_thread_arg_t *connection_arg = (connection_thread_arg_t *)arg;
     int server_fd = connection_arg->server_socket;
 
-    while (1)
-    {
+    while (1) {
         int client_fd = accept(server_fd, NULL, NULL);
         if (client_fd == -1)
             continue;
@@ -239,27 +265,22 @@ void *python_client_connection_handler(void *arg)
 }
 
 // Executa o comanda de sistem si trimite rezultatul clientului
-void execute_system_command(int client_socket, const char *command)
-{
+void execute_system_command(int client_socket, const char *command) {
     int pipefd[2];
     pid_t pid;
 
-    if (pipe(pipefd) != 0)
-    {
+    if (pipe(pipefd) != 0) {
         perror("Pipe failed");
         return;
     }
 
     pid = fork();
-    if (pid == -1)
-    {
+    if (pid == -1) {
         perror("Fork failed");
         close(pipefd[0]);
         close(pipefd[1]);
         return;
-    }
-    else if (pid == 0)
-    {
+    } else if (pid == 0) {
         close(pipefd[0]);
         dup2(pipefd[1], STDOUT_FILENO);
         dup2(pipefd[1], STDERR_FILENO);
@@ -276,15 +297,11 @@ void execute_system_command(int client_socket, const char *command)
     char response[ADMIN_BUFFER_SIZE] = {0};
     int response_len = 0;
 
-    while ((bytes_read = read(pipefd[0], buffer, ADMIN_BUFFER_SIZE - 1)) > 0)
-    {
-        if (response_len + bytes_read < ADMIN_BUFFER_SIZE - 1)
-        {
+    while ((bytes_read = read(pipefd[0], buffer, ADMIN_BUFFER_SIZE - 1)) > 0) {
+        if (response_len + bytes_read < ADMIN_BUFFER_SIZE - 1) {
             memcpy(response + response_len, buffer, bytes_read);
             response_len += bytes_read;
-        }
-        else
-        {
+        } else {
             break;
         }
     }
@@ -296,13 +313,10 @@ void execute_system_command(int client_socket, const char *command)
 }
 
 // Proceseaza comenzi primite de la client
-void process_command(int client_socket, char *command)
-{
-    if (strncmp(command, "uptime", 6) == 0)
-    {
+void process_command(int client_socket, char *command) {
+    if (strncmp(command, "uptime", 6) == 0) {
         struct sysinfo info;
-        if (sysinfo(&info) != 0)
-        {
+        if (sysinfo(&info) != 0) {
             perror("sysinfo failed");
             return;
         }
@@ -312,12 +326,9 @@ void process_command(int client_socket, char *command)
                  (info.uptime % 86400) / 3600, (info.uptime % 3600) / 60,
                  info.uptime % 60);
         send(client_socket, response, strlen(response), 0);
-    }
-    else if (strncmp(command, "stats", 5) == 0)
-    {
+    } else if (strncmp(command, "stats", 5) == 0) {
         struct sysinfo info;
-        if (sysinfo(&info) != 0)
-        {
+        if (sysinfo(&info) != 0) {
             perror("sysinfo failed");
             return;
         }
@@ -338,36 +349,27 @@ void process_command(int client_socket, char *command)
                  (unsigned long)info.freeram * info.mem_unit / 1024 / 1024);
 
         send(client_socket, response, strlen(response), 0);
-    }
-    else if (strncmp(command, "cmd:", 4) == 0)
-    {
+    } else if (strncmp(command, "cmd:", 4) == 0) {
         execute_system_command(client_socket, command + 4);
-    }
-    else
-    {
+    } else {
         execute_system_command(client_socket, command);
     }
 }
 
 // Thread function to handle each client
-void *admin_handler(void *arg)
-{
+void *admin_handler(void *arg) {
     client_thread_arg_t *client_data = (client_thread_arg_t *)arg;
     int client_fd = client_data->socket;
     free(client_data);
 
     char buffer[ADMIN_BUFFER_SIZE] = {0};
 
-    while (1)
-    {
+    while (1) {
         ssize_t num_read = recv(client_fd, buffer, ADMIN_BUFFER_SIZE, 0);
-        if (num_read > 0)
-        {
+        if (num_read > 0) {
             buffer[num_read] = '\0';
             process_command(client_fd, buffer);
-        }
-        else
-        {
+        } else {
             perror("Recvfrom failed");
         }
     }
@@ -376,13 +378,11 @@ void *admin_handler(void *arg)
     return NULL;
 }
 
-void *admin_connection_handler(void *arg)
-{
+void *admin_connection_handler(void *arg) {
     connection_thread_arg_t *connection_arg = (connection_thread_arg_t *)arg;
     int server_fd = connection_arg->server_socket;
 
-    while (1)
-    {
+    while (1) {
         int client_fd = accept(server_fd, NULL, NULL);
         if (client_fd == -1)
             continue;
@@ -399,10 +399,9 @@ void *admin_connection_handler(void *arg)
 
 void shutdown_handler(int sig) { printf("Server shutting down...\n"); }
 
-void ffmpeg_encode(char *filename, char *encoder, char **output_filename)
-{
+void ffmpeg_encode(char *filename, char *encoder, char **output_filename) {
     printf("Starting encoding process for file %s...\n", filename);
-    int out_size = strlen(filename) + 10;
+    int out_size = strlen(filename) + 15;
     *output_filename = malloc(out_size);
     snprintf(*output_filename, out_size, "encoded_%s", filename);
 
@@ -419,8 +418,7 @@ void ffmpeg_encode(char *filename, char *encoder, char **output_filename)
            *output_filename);
 }
 
-void *encode_handler(void *arg)
-{
+void *encode_handler(void *arg) {
     file_processing_arg_t *data = (file_processing_arg_t *)arg;
 
     char *output_filename;
@@ -430,12 +428,138 @@ void *encode_handler(void *arg)
                        data->out_filename);
 }
 
-void send_response_file(int socket, char *filename, char *out_filename)
-{
+void ffmpeg_speed(char *filename, double speed_rate, char **output_filename) {
+    printf("Starting encoding process for file %s...\n", filename);
+    int out_size = strlen(filename) + 15;
+    *output_filename = malloc(out_size);
+    snprintf(*output_filename, out_size, "speeded_%s", filename);
+
+    // Construct FFmpeg command to change the video speed
+    char command[1024];
+    snprintf(command, sizeof(command),
+             "ffmpeg -i \"%s\" -filter:v \"setpts=PTS/%f\" -filter:a "
+             "\"atempo=%f\" \"%s\"",
+             filename, speed_rate, speed_rate, *output_filename);
+
+    // Execute FFmpeg command
+    system(command);
+
+    printf("Speed change completed for file %s, output in %s\n", filename,
+           *output_filename);
+}
+
+void *speed_handler(void *arg) {
+    file_processing_arg_t *data = (file_processing_arg_t *)arg;
+
+    char *output_filename;
+    ffmpeg_speed(data->filename, data->speed_rate, &output_filename);
+
+    send_response_file(data->client_socket, output_filename,
+                       data->out_filename);
+}
+
+void ffmpeg_trim(char *filename, char *start_trim, char *end_trim,
+                 char **output_filename) {
+    printf("Starting encoding process for file %s...\n", filename);
+    int out_size = strlen(filename) + 15;
+    *output_filename = malloc(out_size);
+    snprintf(*output_filename, out_size, "trimmed_%s", filename);
+
+    // Construct FFmpeg command to change the video speed
+    char command[1024];
+    snprintf(command, sizeof(command), "ffmpeg -i \"%s\" -ss %s -to %s \"%s\"",
+             filename, start_trim, end_trim, *output_filename);
+
+    // Execute FFmpeg command
+    system(command);
+
+    printf("Trim completed for file %s, output in %s\n", filename,
+           *output_filename);
+}
+
+void *trim_handler(void *arg) {
+    file_processing_arg_t *data = (file_processing_arg_t *)arg;
+
+    char *output_filename;
+    ffmpeg_trim(data->filename, data->start_trim, data->end_trim,
+                &output_filename);
+
+    send_response_file(data->client_socket, output_filename,
+                       data->out_filename);
+}
+
+void ffmpeg_audio_extract(char *filename, char *out_name,
+                          char **output_filename) {
+    printf("Starting audio extract process for file %s...\n", filename);
+    int out_size = strlen(filename) + 15;
+    *output_filename = malloc(out_size);
+    snprintf(*output_filename, out_size, "extracted_%s", filename);
+
+    for (int i = strlen(*output_filename) - 1, j = strlen(out_name) - 1, k = 0;
+         k < 3; ++k, --i, --j) {
+        (*output_filename)[i] = out_name[j];
+    }
+
+    // Construct FFmpeg command to encode the video
+    char command[1024];
+    snprintf(command, sizeof(command),
+             "ffmpeg -i \"%s\" -vn -acodec copy \"%s\"", filename,
+             *output_filename);
+
+    // Execute FFmpeg command
+    system(command);
+
+    printf("Audio extract completed for file %s, output in %s\n", filename,
+           *output_filename);
+}
+
+void *audio_extract_handler(void *arg) {
+    file_processing_arg_t *data = (file_processing_arg_t *)arg;
+
+    char *output_filename;
+    ffmpeg_audio_extract(data->filename, data->out_filename, &output_filename);
+
+    send_response_file(data->client_socket, output_filename,
+                       data->out_filename);
+}
+
+void ffmpeg_convert(char *filename, char *out_name, char **output_filename) {
+    printf("Starting conversion process for file %s...\n", filename);
+    int out_size = strlen(filename) + 15;
+    *output_filename = malloc(out_size);
+    snprintf(*output_filename, out_size, "converted_%s", filename);
+
+    for (int i = strlen(*output_filename) - 1, j = strlen(out_name) - 1, k = 0;
+         k < 3; ++k, --i, --j) {
+        (*output_filename)[i] = out_name[j];
+    }
+
+    // Construct FFmpeg command to encode the video
+    char command[1024];
+    snprintf(command, sizeof(command), "ffmpeg -i \"%s\" \"%s\"", filename,
+             *output_filename);
+
+    // Execute FFmpeg command
+    system(command);
+
+    printf("Conversion completed for file %s, output in %s\n", filename,
+           *output_filename);
+}
+
+void *convert_handler(void *arg) {
+    file_processing_arg_t *data = (file_processing_arg_t *)arg;
+
+    char *output_filename;
+    ffmpeg_convert(data->filename, data->out_filename, &output_filename);
+
+    send_response_file(data->client_socket, output_filename,
+                       data->out_filename);
+}
+
+void send_response_file(int socket, char *filename, char *out_filename) {
     // Open file to determine the size and to send
     FILE *file = fopen(filename, "rb");
-    if (!file)
-    {
+    if (!file) {
         perror("Failed to open file");
         return;
     }
@@ -453,8 +577,7 @@ void send_response_file(int socket, char *filename, char *out_filename)
     fclose(file);
 }
 
-struct connection_info_struct
-{
+struct connection_info_struct {
     FILE *fp;
     int operation;
     char *encoder;
@@ -464,8 +587,7 @@ struct connection_info_struct
 };
 
 enum MHD_Result send_ws_response(struct MHD_Connection *connection,
-                                 char *message, int success)
-{
+                                 char *message, int success) {
     char error_json[1024];
     snprintf(error_json, sizeof(error_json),
              "{\"status\": \"%s\", \"message\": \"%s.\"}",
@@ -482,11 +604,9 @@ enum MHD_Result send_ws_response(struct MHD_Connection *connection,
 }
 
 static int send_ws_file_response(struct MHD_Connection *connection,
-                                 const char *filename)
-{
+                                 const char *filename) {
     FILE *file = fopen(filename, "rb");
-    if (!file)
-    {
+    if (!file) {
         return send_ws_response(connection, "Server couldn't open file", 0);
     }
 
@@ -513,14 +633,11 @@ enum MHD_Result iterate_post(void *coninfo_cls, enum MHD_ValueKind kind,
                              const char *key, const char *filename,
                              const char *content_type,
                              const char *transfer_encoding, const char *data,
-                             uint64_t off, size_t size)
-{
+                             uint64_t off, size_t size) {
     struct connection_info_struct *con_info = coninfo_cls;
 
-    if (0 == strcmp(key, "file"))
-    {
-        if (0 == off)
-        {
+    if (0 == strcmp(key, "file")) {
+        if (0 == off) {
             // Open a file for writing; use filename provided by client
             ws_unique_id++;
             char unique_filename[FILE_SIZE + 15];
@@ -531,37 +648,31 @@ enum MHD_Result iterate_post(void *coninfo_cls, enum MHD_ValueKind kind,
             if (!con_info->fp)
                 return MHD_NO;
         }
-        if (size > 0)
-        {
+        if (size > 0) {
             fwrite(data, size, 1, con_info->fp);
         }
         return MHD_YES;
     }
-    if (0 == strcmp(key, "output_filename"))
-    {
+    if (0 == strcmp(key, "output_filename")) {
         con_info->output_filename = strdup(data);
     }
-    if (0 == strcmp(key, "encoder"))
-    {
+    if (0 == strcmp(key, "encoder")) {
         con_info->encoder = strdup(data);
     }
-    if (0 == strcmp(key, "operation"))
-    {
+    if (0 == strcmp(key, "operation")) {
         con_info->operation = atoi(data);
     }
     return MHD_YES;
 }
 
 void request_completed(void *cls, struct MHD_Connection *connection,
-                       void **con_cls, enum MHD_RequestTerminationCode toe)
-{
+                       void **con_cls, enum MHD_RequestTerminationCode toe) {
     struct connection_info_struct *con_info = *con_cls;
 
     if (NULL == con_info)
         return;
 
-    if (con_info->fp)
-    {
+    if (con_info->fp) {
         fclose(con_info->fp);
         con_info->fp = NULL;
     }
@@ -578,21 +689,17 @@ enum MHD_Result answer_to_connection(void *cls,
                                      const char *url, const char *method,
                                      const char *version,
                                      const char *upload_data,
-                                     size_t *upload_data_size, void **con_cls)
-{
-    if (NULL == *con_cls)
-    {
+                                     size_t *upload_data_size, void **con_cls) {
+    if (NULL == *con_cls) {
         struct connection_info_struct *con_info =
             malloc(sizeof(struct connection_info_struct));
         if (NULL == con_info)
             return MHD_NO;
 
-        if (0 == strcmp(method, "POST"))
-        {
+        if (0 == strcmp(method, "POST")) {
             con_info->postprocessor = MHD_create_post_processor(
                 connection, 1024, iterate_post, (void *)con_info);
-            if (NULL == con_info->postprocessor)
-            {
+            if (NULL == con_info->postprocessor) {
                 free(con_info);
                 return MHD_NO;
             }
@@ -602,34 +709,29 @@ enum MHD_Result answer_to_connection(void *cls,
         }
     }
 
-    if (0 == strcmp(method, "POST"))
-    {
+    if (0 == strcmp(method, "POST")) {
         struct connection_info_struct *con_info = *con_cls;
 
-        if (*upload_data_size != 0)
-        {
+        if (*upload_data_size != 0) {
             MHD_post_process(con_info->postprocessor, upload_data,
                              *upload_data_size);
             *upload_data_size = 0;
             return MHD_YES;
-        }
-        else if (NULL != con_info->fp)
-        {
+        } else if (NULL != con_info->fp) {
             fclose(con_info->fp);
             con_info->fp = NULL;
 
             char *output_filename;
-            switch (con_info->operation)
-            {
+            switch (con_info->operation) {
             case kEncode:
                 ffmpeg_encode(con_info->filename, con_info->encoder,
                               &output_filename);
                 break;
 
-            case kCut:
-                // ffmpeg_cut(con_info->filename, con_info->encoder,
-                // output_filename);
-                break;
+                // case kCut:
+                //     // ffmpeg_cut(con_info->filename, con_info->encoder,
+                //     // output_filename);
+                //     break;
 
             default:
                 printf("Unknown operation from client\n");
@@ -643,14 +745,12 @@ enum MHD_Result answer_to_connection(void *cls,
     return send_ws_response(connection, "Invalid method", 0);
 }
 
-int main()
-{
+int main() {
     int server_fd;
     struct sockaddr_in server_addr;
     // Setup socket
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd == -1)
-    {
+    if (server_fd == -1) {
         perror("socket creation failed");
         exit(EXIT_FAILURE);
     }
@@ -658,8 +758,7 @@ int main()
     // Forcefully attaching socket to the port 8080
     int opt = 1;
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt,
-                   sizeof(opt)))
-    {
+                   sizeof(opt))) {
         perror("setsockopt");
         exit(EXIT_FAILURE);
     }
@@ -668,13 +767,11 @@ int main()
         htonl(INADDR_ANY); // Listen on any available interface
     server_addr.sin_port = htons(PORT);
     if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) <
-        0)
-    {
+        0) {
         perror("bind failed");
         exit(EXIT_FAILURE);
     }
-    if (listen(server_fd, MAX_SOCKET_CONNECTIONS) < 0)
-    {
+    if (listen(server_fd, MAX_SOCKET_CONNECTIONS) < 0) {
         perror("listen failed");
         exit(EXIT_FAILURE);
     }
