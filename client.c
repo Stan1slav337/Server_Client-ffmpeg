@@ -33,7 +33,7 @@ void *receive_handler(void *arg)
         ResponseHeader resp;
         memcpy(&resp, header_buffer, headerSize);
 
-        FILE *file = fopen(resp.output_filename, "ab");
+        FILE *file = fopen(resp.output_filename, "wb");
         if (!file)
         {
             perror("Failed to open file for writing");

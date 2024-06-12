@@ -55,3 +55,7 @@ dkms.conf
 .vscode/settings.json
 client
 server
+input.mp4
+output.mp4
+build/
+.vscode/tasks.json
