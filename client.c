@@ -118,6 +118,9 @@ int main()
     {
         printf("Available Functions:\n");
         printf("1. Encode video\n");
+        // printf("1. Encode video\n");
+        // printf("1. Encode video\n");
+        printf("4. Extract audio from video\n");
         printf("Select an option: ");
         int option;
         scanf("%d", &option);
@@ -131,6 +134,10 @@ int main()
         {
         case 1:
             option_encoding(&req);
+            break;
+
+        case 4:
+            req.operation = kExtractAudio;
             break;
 
         default:

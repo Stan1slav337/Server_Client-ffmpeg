@@ -40,6 +40,7 @@ typedef struct
 } file_processing_arg_t;
 
 void *encode_handler(void *arg);
+void *audio_extract_handler(void *arg);
 void send_response_file(int socket, char *filename, char *out_filename);
 
 // Thread function to handle each client
@@ -104,6 +105,11 @@ void *python_client_handler(void *arg)
             // pthread_create(&processing_thread, NULL, cut_handler,
             // processing_arg);
             break;
+
+        case kExtractAudio:
+            pthread_create(&processing_thread, NULL, audio_extract_handler,
+                           processing_arg);
+            return NULL;
 
         default:
             printf("Unknown operation\n");
@@ -180,6 +186,11 @@ void *client_handler(void *arg)
         case kCut:
             // pthread_create(&processing_thread, NULL, cut_handler,
             // processing_arg);
+            break;
+
+        case kExtractAudio:
+            pthread_create(&processing_thread, NULL, audio_extract_handler,
+                           processing_arg);
             break;
 
         default:
@@ -425,6 +436,37 @@ void *encode_handler(void *arg)
 
     char *output_filename;
     ffmpeg_encode(data->filename, data->encoder, &output_filename);
+
+    send_response_file(data->client_socket, output_filename,
+                       data->out_filename);
+}
+
+void ffmpeg_audio_extract(char *filename, char **output_filename)
+{
+    printf("Starting audio extract process for file %s...\n", filename);
+    int out_size = strlen(filename) + 10;
+    *output_filename = malloc(out_size);
+    snprintf(*output_filename, out_size, "encoded_%s", filename);
+
+    // Construct FFmpeg command to encode the video
+    char command[1024];
+    snprintf(command, sizeof(command),
+             "ffmpeg -i \"%s\" -vn -acodec copy \"%s\"", filename,
+             *output_filename);
+
+    // Execute FFmpeg command
+    system(command);
+
+    printf("Audio extract completed for file %s, output in %s\n", filename,
+           *output_filename);
+}
+
+void *audio_extract_handler(void *arg)
+{
+    file_processing_arg_t *data = (file_processing_arg_t *)arg;
+
+    char *output_filename;
+    ffmpeg_audio_extract(data->filename, &output_filename);
 
     send_response_file(data->client_socket, output_filename,
                        data->out_filename);

@@ -10,7 +10,8 @@
 typedef enum
 {
     kEncode = 1,
-    kCut
+    kCut,
+    kExtractAudio
 } OperationType;
 
 typedef struct

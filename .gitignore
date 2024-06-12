@@ -52,6 +52,7 @@ Mkfile.old
 dkms.conf
 
 *.mp4
+*.mp3
 .vscode/settings.json
 client
 server
