@@ -85,11 +85,11 @@ def option_encoding():
         return
 
     if encoder_choice == 1:
-        encoder = "h264"
+        encoder = "libx264"
     elif encoder_choice == 2:
-        encoder = "h265"
+        encoder = "libx265"
     elif encoder_choice == 3:
-        encoder = "AV1"
+        encoder = "libsvtav"
     else:
         print("Invalid encoder type selected.")
         return

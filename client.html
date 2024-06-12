@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Video Processing Form</title>
+</head>
+
+<body>
+    <h1>Video Processing Service</h1>
+    <form id="uploadForm">
+        <label for="operation">Operation:</label>
+        <select id="operation">
+            <option value="1">Encode</option>
+            <option value="2">Trim</option>
+        </select><br><br>
+
+        <label for="encoder">Encoder:</label>
+        <select id="encoder">
+            <option value="libx264">H.264</option>
+            <option value="libx265">H.265</option>
+            <option value="libsvtav">AV1</option>
+        </select><br><br>
+
+        <label for="fileInput">Input File:</label>
+        <input type="file" id="fileInput"><br><br>
+
+        <label for="outputFilename">Output Filename:</label>
+        <input type="text" id="outputFilename" placeholder="out.mp4"><br><br>
+
+        <button type="button" onclick="uploadFile()">Upload and Process</button>
+    </form>
+    <div id="downloadLinkContainer"></div>
+
+    <script>
+        function uploadFile() {
+            const operation = document.getElementById('operation').value;
+            const encoder = document.getElementById('encoder').value;
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            const outputFilename = document.getElementById('outputFilename').value;
+
+            if (!file) {
+                alert("Please select a file.");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('operation', operation);
+            formData.append('encoder', encoder);
+            formData.append('file', file); // The file's name is automatically included as the third argument to append
+            formData.append('output_filename', outputFilename);
+
+            fetch('http://localhost:8888/upload', {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => response.blob())
+                .then(blob => {
+                    const url = window.URL.createObjectURL(blob);
+                    const downloadContainer = document.getElementById('downloadLinkContainer');
+                    const downloadLink = document.createElement('a');
+                    downloadLink.href = url;
+                    downloadLink.download = outputFilename || 'downloaded_video.mp4'; 
+                    downloadLink.textContent = `Download ${outputFilename}`;
+                    downloadLink.style.display = 'block'; 
+                    downloadContainer.appendChild(downloadLink);
+                })
+                .catch(error => console.error('Error:', error));
+        }
+    </script>
+</body>
+
+</html>
