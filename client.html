@@ -10,17 +10,16 @@
     <h1>Video Processing Service</h1>
     <form id="uploadForm">
         <label for="operation">Operation:</label>
-        <select id="operation">
+        <select id="operation" onchange="updateFormFields()">
             <option value="1">Encode</option>
-            <option value="2">Trim</option>
+            <option value="2">Speed</option>
+            <option value="3">Trim</option>
+            <option value="4">Extract Audio</option>
+            <option value="5">Convert</option>
+            <option value="6">Merge</option>
         </select><br><br>
 
-        <label for="encoder">Encoder:</label>
-        <select id="encoder">
-            <option value="libx264">H.264</option>
-            <option value="libx265">H.265</option>
-            <option value="libsvtav">AV1</option>
-        </select><br><br>
+        <div id="additionalFields"></div> <!-- Placeholder for additional input fields -->
 
         <label for="fileInput">Input File:</label>
         <input type="file" id="fileInput"><br><br>
@@ -33,9 +32,55 @@
     <div id="downloadLinkContainer"></div>
 
     <script>
+        function updateFormFields() {
+            const operation = document.getElementById('operation').value;
+            const additionalFields = document.getElementById('additionalFields');
+            additionalFields.innerHTML = ''; // Clear previous additional fields
+
+            // Default for Encoder, visible for operation 1, 5
+            const encoderHTML = `
+                <label for="encoder">Encoder:</label>
+                <select id="encoder">
+                    <option value="libx264">H.264</option>
+                    <option value="libx265">H.265</option>
+                    <option value="libsvtav">AV1</option>
+                </select><br><br>
+            `;
+
+            switch (operation) {
+                case '1': // Encode
+                    additionalFields.innerHTML += encoderHTML;
+                    break;
+                case '2': // Speed
+                    additionalFields.innerHTML += `
+                        <label for="speedRate">Speed Rate (0.5 - 2.0):</label>
+                        <input type="number" id="speedRate" min="0.5" max="2.0" step="0.1" required><br><br>
+                    `;
+                    break;
+                case '3': // Trim
+                    additionalFields.innerHTML += `
+                        <label for="startTrim">Start Trim (HH:MM:SS):</label>
+                        <input type="text" id="startTrim" pattern="\\d{2}:\\d{2}:\\d{2}" required><br><br>
+                        <label for="endTrim">End Trim (HH:MM:SS):</label>
+                        <input type="text" id="endTrim" pattern="\\d{2}:\\d{2}:\\d{2}" required><br><br>
+                    `;
+                    break;
+                case '4': // Extract Audio
+                    document.getElementById('outputFilename').placeholder = "output.aac";
+                    break;
+                case '5': // Convert
+                    break;
+                case '6': // Merge
+                    additionalFields.innerHTML += `
+                        <label for="fileInputMerge">Merge with File:</label>
+                        <input type="file" id="fileInputMerge"><br><br>
+                    `;
+                    break;
+            }
+        }
+
         function uploadFile() {
             const operation = document.getElementById('operation').value;
-            const encoder = document.getElementById('encoder').value;
             const fileInput = document.getElementById('fileInput');
             const file = fileInput.files[0];
             const outputFilename = document.getElementById('outputFilename').value;
@@ -47,9 +92,33 @@
 
             const formData = new FormData();
             formData.append('operation', operation);
-            formData.append('encoder', encoder);
-            formData.append('file', file); // The file's name is automatically included as the third argument to append
+            formData.append('filename', file);
             formData.append('output_filename', outputFilename);
+
+            switch (operation) {
+                case '1': // Encode
+                    const encoder = document.getElementById('encoder').value;
+                    formData.append('encoder', encoder);
+                    break;
+                case '2': // Speed
+                    const speedRate = document.getElementById('speedRate');
+                    formData.append('speed_rate', speedRate.value);
+                    break;
+                case '3': // Trim
+                    const startTrim = document.getElementById('startTrim');
+                    const endTrim = document.getElementById('endTrim');
+                    formData.append('start_trim', startTrim.value);
+                    formData.append('end_trim', endTrim.value);
+                    break;
+                case '4':
+                    break;
+                case '5': // Convert
+                    break;
+                case '6': // Merge
+                    const fileMerge = document.getElementById('fileInputMerge') ? document.getElementById('fileInputMerge').files[0] : null;
+                    formData.append('filenameMerge', fileMerge);
+                    break;
+            }
 
             fetch('http://localhost:8888/upload', {
                 method: 'POST',
@@ -61,13 +130,15 @@
                     const downloadContainer = document.getElementById('downloadLinkContainer');
                     const downloadLink = document.createElement('a');
                     downloadLink.href = url;
-                    downloadLink.download = outputFilename || 'downloaded_video.mp4'; 
+                    downloadLink.download = outputFilename || 'downloaded_video.mp4';
                     downloadLink.textContent = `Download ${outputFilename}`;
-                    downloadLink.style.display = 'block'; 
+                    downloadLink.style.display = 'block';
                     downloadContainer.appendChild(downloadLink);
                 })
                 .catch(error => console.error('Error:', error));
         }
+
+        document.addEventListener('DOMContentLoaded', updateFormFields);
     </script>
 </body>
 

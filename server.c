@@ -681,10 +681,15 @@ void send_response_file(int socket, char *filename, char *out_filename)
 struct connection_info_struct
 {
     FILE *fp;
+    FILE *fpMerge;
     int operation;
     char *encoder;
     char *filename;
+    char *filenameMerge;
     char *output_filename;
+    char *start_trim;
+    char *end_trim;
+    double speed_rate;
     struct MHD_PostProcessor *postprocessor;
 };
 
@@ -742,7 +747,7 @@ enum MHD_Result iterate_post(void *coninfo_cls, enum MHD_ValueKind kind,
 {
     struct connection_info_struct *con_info = coninfo_cls;
 
-    if (0 == strcmp(key, "file"))
+    if (0 == strcmp(key, "filename"))
     {
         if (0 == off)
         {
@@ -762,6 +767,25 @@ enum MHD_Result iterate_post(void *coninfo_cls, enum MHD_ValueKind kind,
         }
         return MHD_YES;
     }
+    if (0 == strcmp(key, "filenameMerge"))
+    {
+        if (0 == off)
+        {
+            // Open a file for writing; use filename provided by client
+            char unique_filename[FILE_SIZE + 15];
+            snprintf(unique_filename, sizeof(unique_filename), "ws_m_%d_%s",
+                     ws_unique_id, filename);
+            con_info->filenameMerge = strdup(unique_filename);
+            con_info->fpMerge = fopen(unique_filename, "wb");
+            if (!con_info->fpMerge)
+                return MHD_NO;
+        }
+        if (size > 0)
+        {
+            fwrite(data, size, 1, con_info->fpMerge);
+        }
+        return MHD_YES;
+    }
     if (0 == strcmp(key, "output_filename"))
     {
         con_info->output_filename = strdup(data);
@@ -769,6 +793,18 @@ enum MHD_Result iterate_post(void *coninfo_cls, enum MHD_ValueKind kind,
     if (0 == strcmp(key, "encoder"))
     {
         con_info->encoder = strdup(data);
+    }
+    if (0 == strcmp(key, "start_trim"))
+    {
+        con_info->start_trim = strdup(data);
+    }
+    if (0 == strcmp(key, "end_trim"))
+    {
+        con_info->end_trim = strdup(data);
+    }
+    if (0 == strcmp(key, "speed_rate"))
+    {
+        con_info->speed_rate = atof(data);
     }
     if (0 == strcmp(key, "operation"))
     {
@@ -851,10 +887,30 @@ enum MHD_Result answer_to_connection(void *cls,
                               &output_filename);
                 break;
 
-                // case kCut:
-                //     // ffmpeg_cut(con_info->filename, con_info->encoder,
-                //     // output_filename);
-                //     break;
+            case kSpeed:
+                ffmpeg_speed(con_info->filename, con_info->speed_rate,
+                             &output_filename);
+                break;
+
+            case kTrim:
+                ffmpeg_trim(con_info->filename, con_info->start_trim, con_info->end_trim,
+                            &output_filename);
+                break;
+
+            case kExtractAudio:
+                ffmpeg_audio_extract(con_info->filename, con_info->output_filename,
+                                     &output_filename);
+                break;
+
+            case kConvert:
+                ffmpeg_convert(con_info->filename, con_info->output_filename,
+                               &output_filename);
+                break;
+
+            case kMerge:
+                ffmpeg_merge(con_info->filename, con_info->filenameMerge,
+                             &output_filename);
+                break;
 
             default:
                 printf("Unknown operation from client\n");
