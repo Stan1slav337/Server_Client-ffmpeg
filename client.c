@@ -196,28 +196,35 @@ int main()
             return -1;
         }
 
-        // Open file to determine the number of chunks
-        FILE *file_merged = fopen(req.input_filename_merge, "rb");
-        if (!file)
-        {
-            perror("Failed to open file");
-            close(sock_fd);
-            return -1;
-        }
-
         // Determine file size and number of chunks
         fseek(file, 0, SEEK_END);
         req.length = ftell(file);
         rewind(file);
 
-        // Determine file size and number of chunks
-        fseek(file_merged, 0, SEEK_END);
-        req.lengthMerged = ftell(file_merged);
-        rewind(file_merged);
+        FILE *file_merged = NULL;
+        if (req.operation == kMerge)
+        {
+            // Open file to determine the number of chunks
+            file_merged = fopen(req.input_filename_merge, "rb");
+            if (!file_merged)
+            {
+                perror("Failed to open file");
+                close(sock_fd);
+                return -1;
+            }
+            // Determine file size and number of chunks
+            fseek(file_merged, 0, SEEK_END);
+            req.lengthMerged = ftell(file_merged);
+            rewind(file_merged);
+        }
 
         send_all(sock_fd, (char *)&req, sizeof(RequestHeader));
         send_file(sock_fd, file);
-        send_file(sock_fd, file_merged);
+        if (req.operation == kMerge)
+        {
+            send_file(sock_fd, file_merged);
+        }
+
         fclose(file);
     }
 
