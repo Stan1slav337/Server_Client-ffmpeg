@@ -167,7 +167,6 @@ def main():
                     f.seek(0)
                     print("file_size = ", file_size)
                     send_header(sock, option, encoder, input_filename, output_filename, file_size, speed_rate, start_trim, end_trim)
-                    print("SENT HEADER")
 
                     remaining_chunks = (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
                     while remaining_chunks > 0:

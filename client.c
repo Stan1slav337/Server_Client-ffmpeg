@@ -1,29 +1,26 @@
+#include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
-#include <pthread.h>
-#include <signal.h>
 
 #include "common.h"
 
 int sock_fd;
 
-typedef struct
-{
+typedef struct {
     int socket;
 } receive_thread_arg_t;
 
-void *receive_handler(void *arg)
-{
+void *receive_handler(void *arg) {
     receive_thread_arg_t *receive_data = (receive_thread_arg_t *)arg;
     int server_fd = receive_data->socket;
     free(receive_data);
 
-    while (1)
-    {
+    while (1) {
         // Read header
         size_t headerSize = sizeof(ResponseHeader);
         char header_buffer[headerSize];
@@ -34,20 +31,19 @@ void *receive_handler(void *arg)
         memcpy(&resp, header_buffer, headerSize);
 
         FILE *file = fopen(resp.output_filename, "wb");
-        if (!file)
-        {
+        if (!file) {
             perror("Failed to open file for writing");
             return NULL;
         }
 
         receive_file(server_fd, file, resp.length);
         fclose(file);
-        printf("\nFile processed completely, output: %s\n", resp.output_filename);
+        printf("\nFile processed completely, output: %s\n",
+               resp.output_filename);
     }
 }
 
-void option_encoding(RequestHeader *req)
-{
+void option_encoding(RequestHeader *req) {
     req->operation = kEncode;
     printf("Choose encoder type:\n");
     printf("1. h264\n");
@@ -57,8 +53,7 @@ void option_encoding(RequestHeader *req)
 
     int encoder_choice;
     scanf("%d", &encoder_choice);
-    switch (encoder_choice)
-    {
+    switch (encoder_choice) {
     case 1:
         strcpy(req->encoder, "libx264");
         break;
@@ -74,21 +69,33 @@ void option_encoding(RequestHeader *req)
     }
 }
 
-void shutdown_handler(int sig)
-{
+void option_speed(RequestHeader *req) {
+    req->operation = kSpeed;
+    printf("Enter a speed rate between 0.5 and 2.0: ");
+
+    scanf("%lf", &req->speed_rate);
+}
+
+void option_trim(RequestHeader *req) {
+    req->operation = kTrim;
+    printf("Enter start time position of the trim in the HH:MM:SS format: ");
+    scanf("%s", &req->start_trim);
+    printf("Enter end time position of the trim in the HH:MM:SS format: ");
+    scanf("%s", &req->end_trim);
+}
+
+void shutdown_handler(int sig) {
     close(sock_fd);
     exit(0);
 }
 
-int main()
-{
+int main() {
     struct sockaddr_un server_addr;
     RequestHeader req;
 
     // Create socket
     sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (sock_fd == -1)
-    {
+    if (sock_fd == -1) {
         perror("socket");
         exit(EXIT_FAILURE);
     }
@@ -101,8 +108,8 @@ int main()
     strcpy(server_addr.sun_path, UX_SOCKET_PATH);
 
     // Connect to server
-    if (connect(sock_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1)
-    {
+    if (connect(sock_fd, (struct sockaddr *)&server_addr,
+                sizeof(server_addr)) == -1) {
         perror("connect");
         exit(EXIT_FAILURE);
     }
@@ -114,10 +121,13 @@ int main()
     pthread_detach(receive_thread); // Do not wait for thread termination
 
     // User Interface
-    while (1)
-    {
+    while (1) {
         printf("Available Functions:\n");
-        printf("1. Encode video\n");
+        printf("1. Encode video/audio\n");
+        printf("2. Change speed of video/audio\n");
+        printf("3. Trim video/audio\n");
+        printf("4. Extract audio from video\n");
+        printf("5. Convert video/audio format\n");
         printf("Select an option: ");
         int option;
         scanf("%d", &option);
@@ -127,10 +137,25 @@ int main()
         printf("Enter output filename: ");
         scanf("%s", req.output_filename);
 
-        switch (option)
-        {
+        switch (option) {
         case 1:
             option_encoding(&req);
+            break;
+
+        case 2:
+            option_speed(&req);
+            break;
+
+        case 3:
+            option_trim(&req);
+            break;
+
+        case 4:
+            req.operation = kExtractAudio;
+            break;
+
+        case 5:
+            req.operation = kConvert;
             break;
 
         default:
@@ -140,8 +165,7 @@ int main()
 
         // Open file to determine the number of chunks
         FILE *file = fopen(req.input_filename, "rb");
-        if (!file)
-        {
+        if (!file) {
             perror("Failed to open file");
             close(sock_fd);
             return -1;
