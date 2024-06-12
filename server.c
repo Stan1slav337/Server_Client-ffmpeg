@@ -16,21 +16,20 @@
 
 #define PORT 8080 // Define the port number for the server
 
+#define PORT 8080 // Define the port number for the server
+
 #define MAX_SOCKET_CONNECTIONS 128
 
-typedef struct
-{
+typedef struct {
     int socket;
     struct sockaddr addr;
 } client_thread_arg_t;
 
-typedef struct
-{
+typedef struct {
     int server_socket;
 } connection_thread_arg_t;
 
-typedef struct
-{
+typedef struct {
     int client_socket;
     char filename[FILE_SIZE];
     char out_filename[FILE_SIZE];
@@ -40,20 +39,84 @@ typedef struct
 void *encode_handler(void *arg);
 void send_response_file(int socket, char *filename, char *out_filename);
 
-void print_byte_buffer(const unsigned char *buffer, size_t size)
-{
-    printf("b'"); // Start of the byte string in Python format
-    for (size_t i = 0; i < size; i++)
-    {
-        printf("\\x%02X", buffer[i]); // Print byte in hexadecimal escape format
+// Thread function to handle each client
+void *python_client_handler(void *arg) {
+    client_thread_arg_t *client_data = (client_thread_arg_t *)arg;
+    int client_fd = client_data->socket;
+    free(client_data);
+
+    FILE *input_file = NULL;
+    char unique_filename[FILE_SIZE];
+    int unique_id = 1;
+
+    while (1) {
+        // Read header
+        printf("READING HEADER\n");
+        size_t headerSize = sizeof(RequestHeader);
+        char header_buffer[headerSize];
+        receive_all(client_fd, header_buffer, headerSize);
+
+        for (int i = 0; i < 2; ++i) {
+            putchar(header_buffer[i]);
+        }
+        printf("\n");
+
+        // Cast the buffer to struct
+        RequestHeader req;
+        memcpy(&req, header_buffer, headerSize);
+        printf("GOT HEADER\n");
+
+        printf("%s\n%s\n", req.input_filename, req.output_filename);
+
+        // Create local file and receive from client
+        snprintf(unique_filename, sizeof(unique_filename), "%d_%d_%s",
+                 client_fd, unique_id, req.input_filename);
+        input_file = fopen(unique_filename, "wb");
+        receive_file(client_fd, input_file, req.length);
+        printf("Recived file\n");
+        fclose(input_file);
+        input_file = NULL;
+        unique_id++;
+
+        // Start a new thread for processing
+        printf("File received, starting processing...\n");
+        printf("operation = %d\n", req.operation);
+        pthread_t processing_thread;
+        file_processing_arg_t *processing_arg =
+            malloc(sizeof(file_processing_arg_t));
+        processing_arg->client_socket = client_fd;
+        strcpy(processing_arg->filename, unique_filename);
+        strcpy(processing_arg->out_filename, req.output_filename);
+        strcpy(processing_arg->encoder, req.encoder);
+
+        switch (req.operation) {
+        case kEncode:
+            printf("RIGHT OPERATION\n");
+            pthread_create(&processing_thread, NULL, encode_handler,
+                           processing_arg);
+            return NULL;
+
+        case kCut:
+            // pthread_create(&processing_thread, NULL, cut_handler,
+            // processing_arg);
+            break;
+
+        default:
+            printf("Unknown operation\n");
+            continue;
+        }
+
+        pthread_detach(processing_thread);
     }
-    printf("'");  // End of the byte string
-    printf("\n"); // Print a newline for better output formatting
+
+    if (input_file)
+        fclose(input_file);
+    close(client_fd);
+    return NULL;
 }
 
 // Thread function to handle each client
-void *client_handler(void *arg)
-{
+void *client_handler(void *arg) {
     client_thread_arg_t *client_data = (client_thread_arg_t *)arg;
     int client_fd = client_data->socket;
     free(client_data);
@@ -62,16 +125,14 @@ void *client_handler(void *arg)
     char unique_filename[FILE_SIZE + 30];
     int unique_id = 1;
 
-    while (1)
-    {
+    while (1) {
         // Read header
         printf("READING HEADER\n");
         size_t headerSize = sizeof(RequestHeader);
         char header_buffer[headerSize];
         receive_all(client_fd, header_buffer, headerSize);
 
-        for (int i = 0; i < 2; ++i)
-        {
+        for (int i = 0; i < 2; ++i) {
             putchar(header_buffer[i]);
         }
         printf("\n");
@@ -105,10 +166,8 @@ void *client_handler(void *arg)
         strcpy(processing_arg->out_filename, req.output_filename);
         strcpy(processing_arg->encoder, req.encoder);
 
-        switch (req.operation)
-        {
+        switch (req.operation) {
         case kEncode:
-            printf("RIGHT OPERATION\n");
             pthread_create(&processing_thread, NULL, encode_handler,
                            processing_arg);
             break;
@@ -132,18 +191,16 @@ void *client_handler(void *arg)
     return NULL;
 }
 
-void *client_connection_handler(void *arg)
-{
+void *ux_connection_handler(void *arg) {
     connection_thread_arg_t *connection_arg = (connection_thread_arg_t *)arg;
     int server_fd = connection_arg->server_socket;
 
-    while (1)
-    {
+    while (1) {
         int client_fd = accept(server_fd, NULL, NULL);
         if (client_fd == -1)
             continue;
 
-        printf("Got new inet connection\n");
+        printf("Got new ux connection\n");
 
         pthread_t client_thread;
         client_thread_arg_t *arg = malloc(sizeof(client_thread_arg_t));
@@ -155,43 +212,39 @@ void *client_connection_handler(void *arg)
 
 void shutdown_handler(int sig) { printf("Server shutting down...\n"); }
 
-void ffmpeg_encode(char *filename, char *encoder, char **output_filename)
-{
-    printf("Starting encoding process for file %s...\n", filename);
-    int out_size = strlen(filename) + 10;
-    *output_filename = malloc(out_size);
-    snprintf(*output_filename, out_size, "encoded_%s", filename);
+void *encode_handler(void *arg) {
+    file_processing_arg_t *data = (file_processing_arg_t *)arg;
+    int socket = data->client_socket;
+    char filename[FILE_SIZE];
+    strcpy(filename, data->filename);
+    char out_filename[FILE_SIZE];
+    strcpy(out_filename, data->out_filename);
+    char encoder[10];
+    strcpy(encoder, data->encoder);
+
+    printf("Starting encoding process for file %s...\n", data->filename);
+    char output_filename[FILE_SIZE];
+    snprintf(output_filename, sizeof(output_filename), "encoded_%s", filename);
 
     // Construct FFmpeg command to encode the video
     char command[1024];
     snprintf(command, sizeof(command),
              "ffmpeg -i \"%s\" -c:v %s -c:a copy \"%s\"", filename, encoder,
-             *output_filename);
+             output_filename);
 
     // Execute FFmpeg command
     system(command);
 
     printf("Encoding completed for file %s, output in %s\n", filename,
-           *output_filename);
+           output_filename);
+
+    send_response_file(socket, output_filename, out_filename);
 }
 
-void *encode_handler(void *arg)
-{
-    file_processing_arg_t *data = (file_processing_arg_t *)arg;
-
-    char *output_filename;
-    ffmpeg_encode(data->filename, data->encoder, &output_filename);
-
-    send_response_file(data->client_socket, output_filename,
-                       data->out_filename);
-}
-
-void send_response_file(int socket, char *filename, char *out_filename)
-{
+void send_response_file(int socket, char *filename, char *out_filename) {
     // Open file to determine the size and to send
     FILE *file = fopen(filename, "rb");
-    if (!file)
-    {
+    if (!file) {
         perror("Failed to open file");
         return;
     }
@@ -209,8 +262,7 @@ void send_response_file(int socket, char *filename, char *out_filename)
     fclose(file);
 }
 
-struct connection_info_struct
-{
+struct connection_info_struct {
     FILE *fp;
     int operation;
     char *encoder;
@@ -220,8 +272,7 @@ struct connection_info_struct
 };
 
 enum MHD_Result send_ws_response(struct MHD_Connection *connection,
-                                 char *message, int success)
-{
+                                 char *message, int success) {
     char error_json[1024];
     snprintf(error_json, sizeof(error_json),
              "{\"status\": \"%s\", \"message\": \"%s.\"}",
@@ -238,11 +289,9 @@ enum MHD_Result send_ws_response(struct MHD_Connection *connection,
 }
 
 static int send_ws_file_response(struct MHD_Connection *connection,
-                                 const char *filename)
-{
+                                 const char *filename) {
     FILE *file = fopen(filename, "rb");
-    if (!file)
-    {
+    if (!file) {
         return send_ws_response(connection, "Server couldn't open file", 0);
     }
 
@@ -269,14 +318,11 @@ enum MHD_Result iterate_post(void *coninfo_cls, enum MHD_ValueKind kind,
                              const char *key, const char *filename,
                              const char *content_type,
                              const char *transfer_encoding, const char *data,
-                             uint64_t off, size_t size)
-{
+                             uint64_t off, size_t size) {
     struct connection_info_struct *con_info = coninfo_cls;
 
-    if (0 == strcmp(key, "file"))
-    {
-        if (0 == off)
-        {
+    if (0 == strcmp(key, "file")) {
+        if (0 == off) {
             // Open a file for writing; use filename provided by client
             ws_unique_id++;
             char unique_filename[FILE_SIZE + 15];
@@ -287,37 +333,31 @@ enum MHD_Result iterate_post(void *coninfo_cls, enum MHD_ValueKind kind,
             if (!con_info->fp)
                 return MHD_NO;
         }
-        if (size > 0)
-        {
+        if (size > 0) {
             fwrite(data, size, 1, con_info->fp);
         }
         return MHD_YES;
     }
-    if (0 == strcmp(key, "output_filename"))
-    {
+    if (0 == strcmp(key, "output_filename")) {
         con_info->output_filename = strdup(data);
     }
-    if (0 == strcmp(key, "encoder"))
-    {
+    if (0 == strcmp(key, "encoder")) {
         con_info->encoder = strdup(data);
     }
-    if (0 == strcmp(key, "operation"))
-    {
+    if (0 == strcmp(key, "operation")) {
         con_info->operation = atoi(data);
     }
     return MHD_YES;
 }
 
 void request_completed(void *cls, struct MHD_Connection *connection,
-                       void **con_cls, enum MHD_RequestTerminationCode toe)
-{
+                       void **con_cls, enum MHD_RequestTerminationCode toe) {
     struct connection_info_struct *con_info = *con_cls;
 
     if (NULL == con_info)
         return;
 
-    if (con_info->fp)
-    {
+    if (con_info->fp) {
         fclose(con_info->fp);
         con_info->fp = NULL;
     }
@@ -334,21 +374,17 @@ enum MHD_Result answer_to_connection(void *cls,
                                      const char *url, const char *method,
                                      const char *version,
                                      const char *upload_data,
-                                     size_t *upload_data_size, void **con_cls)
-{
-    if (NULL == *con_cls)
-    {
+                                     size_t *upload_data_size, void **con_cls) {
+    if (NULL == *con_cls) {
         struct connection_info_struct *con_info =
             malloc(sizeof(struct connection_info_struct));
         if (NULL == con_info)
             return MHD_NO;
 
-        if (0 == strcmp(method, "POST"))
-        {
+        if (0 == strcmp(method, "POST")) {
             con_info->postprocessor = MHD_create_post_processor(
                 connection, 1024, iterate_post, (void *)con_info);
-            if (NULL == con_info->postprocessor)
-            {
+            if (NULL == con_info->postprocessor) {
                 free(con_info);
                 return MHD_NO;
             }
@@ -358,25 +394,20 @@ enum MHD_Result answer_to_connection(void *cls,
         }
     }
 
-    if (0 == strcmp(method, "POST"))
-    {
+    if (0 == strcmp(method, "POST")) {
         struct connection_info_struct *con_info = *con_cls;
 
-        if (*upload_data_size != 0)
-        {
+        if (*upload_data_size != 0) {
             MHD_post_process(con_info->postprocessor, upload_data,
                              *upload_data_size);
             *upload_data_size = 0;
             return MHD_YES;
-        }
-        else if (NULL != con_info->fp)
-        {
+        } else if (NULL != con_info->fp) {
             fclose(con_info->fp);
             con_info->fp = NULL;
 
             char *output_filename;
-            switch (con_info->operation)
-            {
+            switch (con_info->operation) {
             case kEncode:
                 ffmpeg_encode(con_info->filename, con_info->encoder,
                               &output_filename);
@@ -399,55 +430,7 @@ enum MHD_Result answer_to_connection(void *cls,
     return send_ws_response(connection, "Invalid method", 0);
 }
 
-int main()
-{
-    int server_fd;
-    struct sockaddr_in server_addr;
-
-    // Setup socket
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd == -1)
-    {
-        perror("socket creation failed");
-        exit(EXIT_FAILURE);
-    }
-
-    memset(&server_addr, 0, sizeof(server_addr));
-    // Forcefully attaching socket to the port 8080
-    int opt = 1;
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt,
-                   sizeof(opt)))
-    {
-        perror("setsockopt");
-        exit(EXIT_FAILURE);
-    }
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr =
-        htonl(INADDR_ANY); // Listen on any available interface
-    server_addr.sin_port = htons(PORT);
-
-    if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) <
-        0)
-    {
-        perror("bind failed");
-        exit(EXIT_FAILURE);
-    }
-
-    if (listen(server_fd, MAX_SOCKET_CONNECTIONS) < 0)
-    {
-        perror("listen failed");
-        exit(EXIT_FAILURE);
-    }
-
-    pthread_t connection_thread;
-    connection_thread_arg_t *connection_arg =
-        malloc(sizeof(connection_thread_arg_t));
-    connection_arg->server_socket = server_fd;
-    pthread_create(&connection_thread, NULL, client_connection_handler,
-                   connection_arg);
-    pthread_detach(connection_thread); // The thread can run independently
-
-    // Unix part
+int main() {
     int ux_server_fd;
     struct sockaddr_un server_addr_ux;
 
@@ -471,6 +454,25 @@ int main()
 
     int admin_ux_server_fd;
     struct sockaddr_un admin_server_addr_ux;
+
+    // Setup admin socket
+    admin_ux_server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    memset(&admin_server_addr_ux, 0, sizeof(struct sockaddr_un));
+    admin_server_addr_ux.sun_family = AF_UNIX;
+    strcpy(admin_server_addr_ux.sun_path, ADMIN_SOCKET_PATH);
+    unlink(ADMIN_SOCKET_PATH);
+    bind(admin_ux_server_fd, (struct sockaddr *)&admin_server_addr_ux,
+         sizeof(admin_server_addr_ux));
+    listen(admin_ux_server_fd, 1);
+
+    pthread_t admin_ux_connection_thread;
+    connection_thread_arg_t *admin_ux_connection_arg =
+        malloc(sizeof(connection_thread_arg_t));
+    admin_ux_connection_arg->server_socket = admin_ux_server_fd;
+    pthread_create(&admin_ux_connection_thread, NULL, admin_connection_handler,
+                   admin_ux_connection_arg);
+    pthread_detach(
+        admin_ux_connection_thread); // The thread can run independently
 
     // WS part
     struct MHD_Daemon *daemon;
